@@ -1,0 +1,23 @@
+bundle:
+  name: streamline
+
+include:
+  - src/*.yml
+  - src/env/*.yml
+  - resources/jobs/*.yml
+  - resources/pipelines/*.yml
+  - resources/schemas/*.yml
+
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace: 
+      host: ${var.dev_workspace}
+    
+  prod:
+    mode: production
+    default: false
+    workspace:
+      host: ${var.prod_workspace}

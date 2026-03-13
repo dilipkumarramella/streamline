@@ -1,0 +1,6 @@
+resources:
+  schemas:
+    gold_schema:
+      name: gold
+      catalog_name: ${var.catalog}
+      comment: "Aggregated and curated data layer"

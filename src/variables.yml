@@ -1,0 +1,7 @@
+variables:
+  dev_workspace: "https://adb-7405604613583163.3.azuredatabricks.net/"
+  prod_workspace: ""
+  catalog:
+    description: "We need to specify the Catalog name"
+    default: streamline
+
