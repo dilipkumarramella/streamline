@@ -6,10 +6,10 @@ def get_config(env: str) -> dict:
             "storage_account": "streamlinedevstorage",
             
             # ADLS Paths
-            "bronze_path": "abfss://bronze@streamlinedevstorage.dfs.core.windows.net/",
-            "silver_path": "abfss://silver@streamlinedevstorage.dfs.core.windows.net/",
-            "gold_path": "abfss://gold@streamlinedevstorage.dfs.core.windows.net/",
-            "checkpoint_path": "abfss://checkpoints@streamlinedevstorage.dfs.core.windows.net/",
+            "bronze_path": "abfss://streamline@streamlinedevstorage.dfs.core.windows.net/bronze/",
+            "silver_path": "abfss://streamline@streamlinedevstorage.dfs.core.windows.net/silver/",
+            "gold_path": "abfss://streamline@streamlinedevstorage.dfs.core.windows.net/gold/",
+            "checkpoint_path": "abfss://streamline@streamlinedevstorage.dfs.core.windows.net/checkpoints/",
             
             # Unity Catalog
             "catalog": "streamline",

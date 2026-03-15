@@ -63,8 +63,8 @@ def check_duplicates(
                         Multiple: ["order_id", "product_id"]
         sort_col: Column to sort by to find latest record
                   Example: "order_timestamp"
-                  Latest record = row_num 1 = good ✅
-                  Older duplicates = row_num > 1 = bad ✅
+                  Latest record = row_num 1 = good
+                  Older duplicates = row_num > 1 = bad
 
     Returns:
         DataFrame with rejection_reason column updated
@@ -104,7 +104,7 @@ def check_duplicates(
     return df
 
 
-    def check_positive_values(
+def check_positive_values(
     df,
     columns: list
 ) -> DataFrame:
@@ -235,8 +235,8 @@ def quarantine_records(
     Split DataFrame into good and bad records
     based on rejection_reason column.
 
-    Good records → rejection_reason is null → Silver ✅
-    Bad records → rejection_reason is not null → Quarantine ✅
+    Good records → rejection_reason is null → Silver
+    Bad records → rejection_reason is not null → Quarantine
 
     Args:
         df: Input DataFrame with rejection_reason column

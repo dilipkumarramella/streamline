@@ -10,7 +10,7 @@ def read_data(
     file_type: str,
     location: str = None,
     schema=None,
-    options: dict = {}
+    options: dict = {},
     table_name: str = None
 ) -> DataFrame:
     """
@@ -64,7 +64,7 @@ def read_data(
         return reader.load(location)
 
 
-    def read_stream_data(
+def read_stream_data(
     spark,
     file_type: str,
     location: str = None,
@@ -179,7 +179,10 @@ def write_data(
     writer = df.write.format(file_type)
 
     writer = writer.mode(mode)
-
+    
+    # Always merge schema for schema evolution
+    writer = writer.option("mergeSchema", "true")
+    
     for key, value in options.items():
         writer = writer.option(key, value)
 
@@ -195,7 +198,6 @@ def merge_to_delta(
     target_table: str,
     merge_condition: str,
     update_set: dict,
-    insert_values: dict
 ) -> None:
     """
     Idempotent MERGE into Delta table.
@@ -211,9 +213,6 @@ def merge_to_delta(
         update_set: Columns to update when matched
                     Example: {"order_status": "source.order_status",
                               "updated_at": "source.updated_at"}
-        insert_values: Columns to insert when not matched
-                       Example: {"order_id": "source.order_id",
-                                 "customer_id": "source.customer_id"}
 
     Returns:
         None
@@ -227,16 +226,12 @@ def merge_to_delta(
             update_set={
                 "order_status": "source.order_status",
                 "updated_at": "source.updated_at"
-            },
-            insert_values={
-                "order_id": "source.order_id",
-                "customer_id": "source.customer_id",
-                "order_status": "source.order_status",
-                "created_at": "source.created_at"
             }
         )
     """
     target = DeltaTable.forName(spark, target_table)
+
+    spark.conf.set("spark.databricks.delta.schema.autoMerge.enabled", "true")
 
     target.alias("target") \
         .merge(
@@ -244,7 +239,7 @@ def merge_to_delta(
             merge_condition
         ) \
         .whenMatchedUpdate(set=update_set) \
-        .whenNotMatchedInsert(values=insert_values) \
+        .whenNotMatchedInsertAll() \
         .execute()
 
 
@@ -454,7 +449,7 @@ def vacuum_table(
         retention_hours: Hours to retain old files
                          Default: 168 (7 days)
                          WARNING: Never go below 168!
-                         Databricks recommendation ✅
+                         Databricks recommendation
 
     Returns:
         None
@@ -521,12 +516,13 @@ def table_exists(
     table_name: str
 ) -> bool:
     """
-    Check if Delta table exists.
-    Used before first pipeline run!
+    Check if Delta table exists in Unity catalog
+    Used before first pipeline run to decide
+    between write_data() and merge_to_delta()!
 
     Args:
         spark: SparkSession
-        table_name: Delta table name
+        table_name: Unity Catalog table name
                     Example: "streamline.silver.fact_orders"
 
     Returns:
@@ -551,10 +547,4 @@ def table_exists(
                 ...
             )
     """
-    try:
-        spark.table(table_name)
-        return True
-    except Exception:
-        return False
-
-
+    return spark.catalog.tableExists(table_name)
