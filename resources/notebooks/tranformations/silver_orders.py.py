@@ -14,7 +14,11 @@ from resources.notebooks.utils.delta_helpers import (
     merge_to_delta,
     optimize_table,
     table_exists,
-    get_last_version
+    get_last_version,
+    get_last_processed_version,
+    update_pipeline_state,
+    safe_cast,
+    column_exists
 )
 from resources.notebooks.utils.data_quality import (
     check_nulls,
@@ -22,7 +26,8 @@ from resources.notebooks.utils.data_quality import (
     check_positive_values,
     check_valid_values,
     check_future_dates,
-    quarantine_records
+    quarantine_records,
+    validate_schema
 )
 
 from pyspark.sql.functions import (
@@ -36,15 +41,36 @@ from pyspark.sql.functions import (
 
 # COMMAND ----------
 
-spark.version
-
-# COMMAND ----------
-
 # ─────────────────────────────────
 # CONFIGS
 # ─────────────────────────────────
 # env = dbutils.widgets.get("env")
 config = get_config(env="dev")
+
+# Backfill / Reprocessing parameters
+dbutils.widgets.text("start_datetime", "")
+dbutils.widgets.text("end_datetime", "")
+
+start_datetime = dbutils.widgets.get("start_datetime")
+end_datetime = dbutils.widgets.get("end_datetime")
+
+# Validate both provided or both empty
+if bool(start_datetime) != bool(end_datetime):
+    raise ValueError(
+        "Both start_datetime and end_datetime "
+        "must be provided together! "
+        "Either both empty or both filled."
+    )
+    
+# Validate start < end
+if start_datetime and end_datetime:
+    if start_datetime >= end_datetime:
+        raise ValueError(
+            "start_datetime must be less than "
+            "end_datetime! "
+            f"Got start: {start_datetime} "
+            f"end: {end_datetime}"
+        )
 
 # COMMAND ----------
 
@@ -54,36 +80,106 @@ config = get_config(env="dev")
 
 def read_bronze_orders():
     """
-    Read new records from bronze.orders
-    using Change Data Feed (CDF).
-    Only reads records since last version!
-    Incremental read!
+    Read orders from bronze layer.
+    Supports two modes:
+
+    Normal mode (no datetime passed):
+    -> First run reads all records from bronze
+    -> Subsequent runs use CDF incremental read
+       to process only new records
+    -> If no pipeline state found reads all bronze
+       and merge handles duplicates
+
+    Backfill/Reprocessing mode (datetime passed):
+    -> Reads bronze filtered by datetime range
+    -> Backfill: process missed historical data
+    -> Reprocessing: rerun with corrected logic
+    -> merge_to_delta ensures no duplicates
+       during reprocessing
+
+    Returns:
+        DataFrame
+
+    Example:
+        # Normal run:
+        start_datetime = ""
+        end_datetime = ""
+
+        # Backfill or reprocessing:
+        start_datetime = "2026-03-13 00:00:00"
+        end_datetime = "2026-03-13 23:59:59"
+
+        # Specific hour:
+        start_datetime = "2026-03-13 10:00:00"
+        end_datetime = "2026-03-13 11:00:00"
     """
-    if table_exists(spark, config["silver_fact_orders"]):
-        # Get last processed version
-        last_version = get_last_version(
-            spark,
-            config["bronze_orders"]
+
+    # Check bronze exists first!
+    if not table_exists(spark, config["bronze_orders"]):
+        print("Bronze orders table not found - exiting pipeline")
+        return None
+    
+    # Backfill / Reprocessing mode
+    if start_datetime and end_datetime:
+        print(f"Backfill/Reprocessing mode: {start_datetime} to {end_datetime}")
+        df = (
+            spark.read
+            .table(config["bronze_orders"])
+            .where(
+                f"ingested_at >= '{start_datetime}' "
+                f"AND ingested_at <= '{end_datetime}'"
+            )
         )
 
-        # Read only new records using CDF
-        df = read_data(
-            spark=spark,
-            file_type="delta",
-            table_name=config["bronze_orders"],
-            options={
-                "readChangeFeed": "true",
-                "startingVersion": last_version
-            }
-        )
+    # Normal incremental mode
     else:
-        # First run!
-        # Read everything from bronze
-        df = read_data(
-            spark=spark,
-            file_type="delta",
-            table_name=config["bronze_orders"]
-        )
+        if table_exists(spark, config["silver_fact_orders"]):
+
+            # Get last processed version from state
+            last_version = get_last_processed_version(
+                spark=spark,
+                pipeline_state_table=config["pipeline_state"],
+                pipeline_name="bronze_to_silver_orders"
+            )
+
+            if last_version == 0:
+                # No state found
+                # Read ALL bronze data
+                # merge handles duplicates!
+                print("No pipeline state found - reading all bronze data")
+                df = read_data(
+                    spark=spark,
+                    file_type="delta",
+                    table_name=config["bronze_orders"]
+                )
+            
+            elif last_version >= get_last_version(spark, config["bronze_orders"]):
+                print("No new versions in bronze - nothing to process")
+                return None
+            
+            else:
+                # State found
+                # CDF incremental read
+                print(f"Reading CDF from version {last_version + 1}")
+                
+                df = read_data(
+                    spark=spark,
+                    file_type="delta",
+                    table_name=config["bronze_orders"],
+                    options={
+                        "readChangeFeed": "true",
+                        "startingVersion": last_version + 1
+                    }
+                )
+                    
+        else:
+            # First run - read all
+            print("First run - reading all bronze data")
+            df = read_data(
+                spark=spark,
+                file_type="delta",
+                table_name=config["bronze_orders"]
+            )
 
     return df
 
@@ -99,6 +195,12 @@ def flatten_orders(df):
     nested item columns.
     One row per order-item!
     """
+
+    # Check items column exists
+    if not column_exists(df, "items"):
+        print("WARNING: items column missing - skipping explode")
+        return df
+    
     # Explode items array
     df = df.withColumn("item", explode(col("items")))
 
@@ -133,7 +235,7 @@ def drop_unnecessary_columns(df):
         "payment_method",  # goes to fact_payments
         "payment_status",  # goes to fact_payments
         "product_name",    # goes to dim_product
-        "category"         # goes to dim_product
+        "category",         # goes to dim_product
         "ingested_at"      # bronze only
     )
 
@@ -166,20 +268,25 @@ def clean_data(df):
     Trim strings and fill non critical nulls.
     Must run BEFORE quality checks!
     """
-    # Cast all columns to correct types
-    df = df.withColumn("order_id", expr("try_cast(order_id as string)"))
-    df = df.withColumn("customer_id", expr("try_cast(customer_id as string)"))
-    df = df.withColumn("product_id", expr("try_cast(product_id as string)"))
-    df = df.withColumn("order_status", expr("try_cast(order_status as string)"))
-    df = df.withColumn("order_timestamp", expr("try_cast(order_timestamp as timestamp)"))
-    df = df.withColumn("quantity", expr("try_cast(quantity as int)"))
-    df = df.withColumn("unit_price", expr("try_cast(unit_price as double)"))
     
-    # Trim String columns
-    df = df.withColumn("order_id", trim(col("order_id")))
-    df = df.withColumn("customer_id", trim(col("customer_id")))
-    df = df.withColumn("product_id", trim(col("product_id")))
-    df = df.withColumn("order_status", trim(col("order_status")))
+    # Trim string columns
+    if column_exists(df, "order_id"):
+        df = df.withColumn("order_id", trim(col("order_id")))
+    if column_exists(df, "customer_id"):
+        df = df.withColumn("customer_id", trim(col("customer_id")))
+    if column_exists(df, "product_id"):
+        df = df.withColumn("product_id", trim(col("product_id")))
+    if column_exists(df, "order_status"):
+        df = df.withColumn("order_status", trim(col("order_status")))
+
+    # Safe cast
+    df = safe_cast(df, "order_id", "string")
+    df = safe_cast(df, "customer_id", "string")
+    df = safe_cast(df, "product_id", "string")
+    df = safe_cast(df, "order_status", "string")
+    df = safe_cast(df, "order_timestamp", "timestamp")
+    df = safe_cast(df, "quantity", "int")
+    df = safe_cast(df, "unit_price", "double")
 
     # Fill non critical nulls
     df = df.fillna({"order_status": "Unknown"})
@@ -198,6 +305,21 @@ def run_quality_checks(df):
     Adds rejection_reason column.
     Must run AFTER clean_data()!
     """
+
+    # Check schema
+    validate_schema(
+        df=df,
+        expected_columns=[
+            "order_id",
+            "customer_id",
+            "product_id",
+            "quantity",
+            "unit_price",
+            "order_status",
+            "order_timestamp",
+            "created_at"
+        ]
+    )
     # Check nulls on critical columns
     df = check_nulls(
         df=df,
@@ -245,42 +367,39 @@ def run_quality_checks(df):
 # WRITE TO SILVER
 # ─────────────────────────────────
 
-def write_to_silver(good_df, bad_df):
+def write_to_silver(good_df, bad_df, good_count, bad_count):
     """
     Write good records to silver.fact_orders
     Write bad records to silver.orders_quarantine
+    Skips write if count is 0!
     """
-    # Write good records
-    if table_exists(spark, config["silver_fact_orders"]):
-        # Table exists → incremental merge
-        merge_to_delta(
-            spark=spark,
-            source_df=good_df,
-            target_table=config["silver_fact_orders"],
-            merge_condition="target.order_id = source.order_id AND target.product_id = source.product_id",
-            update_set={
-                "order_status": "source.order_status",
-                "quantity": "source.quantity",
-                "unit_price": "source.unit_price",
-                "created_at": "source.created_at"
-            }
-        )
-    else:
-        # First run → simple write
+    if good_count > 0:
+        if table_exists(spark, config["silver_fact_orders"]):
+            merge_to_delta(
+                spark=spark,
+                source_df=good_df,
+                target_table=config["silver_fact_orders"],
+                merge_condition="target.order_id = source.order_id AND target.product_id = source.product_id",
+                update_set={
+                    "order_status": "source.order_status",
+                    "quantity": "source.quantity",
+                    "unit_price": "source.unit_price",
+                    "created_at": "source.created_at"
+                }
+            )
+        else:
+            write_data(
+                df=good_df,
+                file_type="delta",
+                table_name=config["silver_fact_orders"]
+            )
+
+    if bad_count > 0:
         write_data(
-            df=good_df,
+            df=bad_df,
             file_type="delta",
-            table_name=config["silver_fact_orders"]
+            table_name=config["silver_orders_quarantine"]
         )
-
-    # Write bad records to quarantine
-    write_data(
-        df=bad_df,
-        file_type="delta",
-        table_name=config["silver_orders_quarantine"]
-    )
-
-    print("Write complete")
 
 # COMMAND ----------
 
@@ -291,25 +410,36 @@ def write_to_silver(good_df, bad_df):
 def optimize_silver_tables(good_count, bad_count):
     """
     Run OPTIMIZE on silver tables after write.
-    Only optimizes if records were written!
+    Only optimizes if records were written.
+    Non critical - warns if fails but
+    does not break pipeline!
     """
-    if good_count > 0:
-        optimize_table(
-            spark=spark,
-            table_name=config["silver_fact_orders"],
-            zorder_cols=["customer_id", "order_timestamp"]
-        )
-        print("Optimize complete on silver.fact_orders")
-
-    if bad_count > 0:
-        optimize_table(
-            spark=spark,
-            table_name=config["silver_orders_quarantine"]
-        )
-        print("Optimize complete on silver.orders_quarantine")
-
     if good_count == 0 and bad_count == 0:
         print("No records written - skipping optimize")
+        return
+
+    if good_count > 0:
+        try:
+            optimize_table(
+                spark=spark,
+                table_name=config["silver_fact_orders"],
+                zorder_cols=["customer_id", "order_timestamp"]
+            )
+            print("Optimize complete on silver.fact_orders")
+        except Exception as e:
+            print(f"Optimize failed on silver.fact_orders: {str(e)}")
+            print("Continuing pipeline...")
+
+    if bad_count > 0:
+        try:
+            optimize_table(
+                spark=spark,
+                table_name=config["silver_orders_quarantine"]
+            )
+            print("Optimize complete on silver.orders_quarantine")
+        except Exception as e:
+            print(f"Optimize failed on silver.orders_quarantine: {str(e)}")
+            print("Continuing pipeline...")
 
 # COMMAND ----------
 
@@ -321,40 +451,89 @@ def run_pipeline():
     """
     Main pipeline function.
     Orchestrates all steps in order.
+    Handles errors and pipeline state.
     """
-    print("Starting silver orders pipeline...")
+    try:
+        print("Starting silver orders pipeline...")
 
-    # Read
-    df = read_bronze_orders()
-    print(f"Read {df.count()} records from bronze")
+        # Read
+        df = read_bronze_orders()
 
-    # Transform
-    df = flatten_orders(df)
-    df = drop_unnecessary_columns(df)
-    df = add_audit_columns(df)
-    df = clean_data(df)
-    print("Transformations complete")
+        # Check if no new data
+        if df is None:
+            print("No new data to process - exiting pipeline")
+            return
+        
+        print(f"Read {df.count()} records from bronze")
 
-    # Quality checks
-    df = run_quality_checks(df)
-    print("Quality checks complete")
+        # Get current bronze version BEFORE processing
+        current_version = get_last_version(
+            spark, config["bronze_orders"]
+        )
 
-    # Separate good and bad
-    good_df, bad_df = quarantine_records(df)
-    good_count = good_df.count()
-    bad_count = bad_df.count()
-    print(f"Good records: {good_count}")
-    print(f"Bad records: {bad_count}")
+        # Transform
+        df = flatten_orders(df)
+        df = drop_unnecessary_columns(df)
+        df = add_audit_columns(df)
+        df = clean_data(df)
+        print("Transformations complete")
 
-    # Write
-    write_to_silver(good_df, bad_df)
-    print(f"{good_count} records written to {config['silver_fact_orders']}")
-    print(f"{bad_count} records written to {config['silver_orders_quarantine']}")
+        # Quality checks
+        df = run_quality_checks(df)
+        print("Quality checks complete")
 
-    # Optimize
-    optimize_silver_tables(good_count, bad_count)
+        # Cache
+        df.cache()
 
-    print("Silver orders pipeline complete")
+        # Separate good and bad
+        good_df, bad_df = quarantine_records(df)
+        good_count = good_df.count()
+        bad_count = bad_df.count()
+        print(f"Good records: {good_count}")
+        print(f"Bad records: {bad_count}")
+
+
+        # Write
+        if good_count == 0 and bad_count == 0:
+            print("No records to write - skipping")
+        else:
+            write_to_silver(good_df, bad_df, good_count, bad_count)
+            print(f"{good_count} records written to {config['silver_fact_orders']}")
+            print(f"{bad_count} records written to {config['silver_orders_quarantine']}")
+
+        # Update pipeline state on success
+        update_pipeline_state(
+            spark=spark,
+            pipeline_state_table=config["pipeline_state"],
+            pipeline_name="bronze_to_silver_orders",
+            last_processed_version=current_version,
+            status="success"
+        )
+
+        # Optimize
+        optimize_silver_tables(good_count, bad_count)
+
+        print("Silver orders pipeline complete")
+
+    except Exception as e:
+        print(f"Pipeline failed: {str(e)}")
+        try:
+            update_pipeline_state(
+                spark=spark,
+                pipeline_state_table=config["pipeline_state"],
+                pipeline_name="bronze_to_silver_orders",
+                last_processed_version=0,
+                status="failed"
+            )
+        except Exception as state_error:
+            print(f"State update failed: {str(state_error)}")
+        raise
+
+    finally:
+        try:
+            df.unpersist()
+        except:
+            pass
 
 # COMMAND ----------
 

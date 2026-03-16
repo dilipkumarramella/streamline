@@ -37,6 +37,9 @@ def get_config(env: str) -> dict:
             "gold_funnel_metrics": "streamline.gold.funnel_metrics",
             "gold_payment_success": "streamline.gold.payment_success_rate",
             "gold_data_quality": "streamline.gold.data_quality_metrics",
+
+            # Pipeline State
+            "pipeline_state": "streamline.silver.pipeline_state"
         },
         
         "prod": {
@@ -75,6 +78,9 @@ def get_config(env: str) -> dict:
             "gold_funnel_metrics": "streamline.gold.funnel_metrics",
             "gold_payment_success": "streamline.gold.payment_success_rate",
             "gold_data_quality": "streamline.gold.data_quality_metrics",
+
+            # Pipeline State
+            "pipeline_state": "streamline.silver.pipeline_state"
         }
     }
     

@@ -1,6 +1,7 @@
 from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql.functions import current_date, lit
+from pyspark.sql.functions import current_date, lit, expr, current_timestamp
 from delta.tables import DeltaTable
+from pyspark.sql.types import StructType, StructField, StringType, LongType, TimestampType
 
 # ---------------------------------
 # READ FUNCTIONS
@@ -548,3 +549,250 @@ def table_exists(
             )
     """
     return spark.catalog.tableExists(table_name)
+
+
+# ─────────────────────────────────
+# CDF FUNCTIONS
+# ─────────────────────────────────
+
+def enable_cdf(spark, table_name: str) -> None:
+    """
+    Enable Change Data Feed on Delta table
+    if not already enabled.
+    Safe to call multiple times - idempotent!
+
+    Args:
+        spark: SparkSession
+        table_name: Delta table name
+                    Example: "streamline.bronze.orders"
+
+    Returns:
+        None
+
+    Example:
+        enable_cdf(
+            spark=spark,
+            table_name=config["bronze_orders"]
+        )
+    """
+    if table_exists(spark, table_name):
+        cdf_enabled = spark.sql(f"""
+            SHOW TBLPROPERTIES {table_name}
+        """).filter("key = 'delta.enableChangeDataFeed'") \
+          .filter("value = 'true'") \
+          .count() > 0
+
+        if not cdf_enabled:
+            spark.sql(f"""
+                ALTER TABLE {table_name}
+                SET TBLPROPERTIES
+                (delta.enableChangeDataFeed = true)
+            """)
+            print(f"CDF enabled on {table_name}")
+
+
+# ─────────────────────────────────
+# PIPELINE STATE FUNCTIONS
+# ─────────────────────────────────
+
+def get_last_processed_version(
+    spark,
+    pipeline_state_table: str,
+    pipeline_name: str
+) -> int:
+    """
+    Get last successfully processed bronze
+    version for a given pipeline.
+    Used to determine CDF starting version
+    for incremental reads.
+
+    Args:
+        spark: SparkSession
+        pipeline_state_table: State table name
+                              Example: "streamline.silver.pipeline_state"
+        pipeline_name: Name of pipeline
+                       Example: "silver_orders"
+
+    Returns:
+        int: Last successfully processed version
+             Returns 0 if:
+             - First run ever
+             - No successful runs found
+             - State table not exists
+
+    Example:
+        last_version = get_last_processed_version(
+            spark=spark,
+            pipeline_state_table=config["pipeline_state"],
+            pipeline_name="silver_orders"
+        )
+        # Returns 110
+        # Next CDF read starts from 111
+    """
+    # State table not created yet
+    # First run ever!
+    if not table_exists(spark, pipeline_state_table):
+        return 0
+
+    # Find last successful run version
+    result = spark.sql(f"""
+        SELECT last_processed_version
+        FROM {pipeline_state_table}
+        WHERE pipeline_name = '{pipeline_name}'
+        AND status = 'success'
+        ORDER BY last_run_time DESC
+        LIMIT 1
+    """).collect()
+
+    # State found - return version
+    if result:
+        return result[0][0]
+
+    # No successful runs found
+    return 0
+
+
+def update_pipeline_state(
+    spark,
+    pipeline_state_table: str,
+    pipeline_name: str,
+    last_processed_version: int,
+    status: str = "success"
+) -> None:
+    """
+    Update pipeline state after each run.
+    Tracks last processed bronze version
+    for incremental CDF reads.
+    Appends new row every run for
+    full audit history!
+
+    Args:
+        spark: SparkSession
+        pipeline_state_table: State table name
+                              Example: "streamline.silver.pipeline_state"
+        pipeline_name: Name of pipeline
+                       Example: "bronze_to_silver_orders"
+        last_processed_version: Latest bronze version
+                                 processed successfully
+                                 Pass 0 if pipeline failed
+        status: Pipeline run status
+                Default: "success"
+                Options: "success", "failed"
+
+    Returns:
+        None
+
+    Example:
+        # On success:
+        update_pipeline_state(
+            spark=spark,
+            pipeline_state_table=config["pipeline_state"],
+            pipeline_name="bronze_to_silver_orders",
+            last_processed_version=120,
+            status="success"
+        )
+
+        # On failure:
+        update_pipeline_state(
+            spark=spark,
+            pipeline_state_table=config["pipeline_state"],
+            pipeline_name="bronze_to_silver_orders",
+            last_processed_version=0,
+            status="failed"
+        )
+    """
+    schema = StructType([
+        StructField("pipeline_name", StringType(), False),
+        StructField("last_processed_version", LongType(), False),
+        StructField("last_run_time", TimestampType(), True),
+        StructField("status", StringType(), True)
+    ])
+
+    data = [(pipeline_name, last_processed_version, None, status)]
+    df = spark.createDataFrame(data, schema)
+    df = df.withColumn("last_run_time", current_timestamp())
+
+    write_data(
+        df=df,
+        file_type="delta",
+        table_name=pipeline_state_table
+    )
+
+    print(f"Pipeline state updated: {pipeline_name} | version {last_processed_version} | {status}")
+
+
+# ─────────────────────────────────
+# SAFE CAST FUNCTIONS
+# ─────────────────────────────────
+
+def safe_cast(
+    df,
+    column: str,
+    cast_type: str
+) -> DataFrame:
+    """
+    Safely cast column to given type.
+    Skips if column does not exist.
+    Uses try_cast to return null
+    instead of failing on bad values.
+    Uses column_exists() for safety check.
+
+    Args:
+        df: Input DataFrame
+        column: Column name to cast
+                Example: "unit_price"
+        cast_type: Target type as string
+                   Example: "double"
+                   Options: "double", "int",
+                            "timestamp", "string",
+                            "boolean", "long"
+
+    Returns:
+        DataFrame with column cast
+        if exists, unchanged if missing
+
+    Example:
+        df = safe_cast(df, "unit_price", "double")
+        df = safe_cast(df, "quantity", "int")
+        df = safe_cast(df, "order_timestamp", "timestamp")
+    """
+    if not column_exists(df, column):
+        print(f"Column {column} not found - skipping cast")
+        return df
+
+    df = df.withColumn(
+        column,
+        expr(f"try_cast({column} as {cast_type})")
+    )
+
+    return df
+
+
+# ─────────────────────────────────
+# COLUMN EXISTS FUNCTION
+# ─────────────────────────────────
+def column_exists(
+    df,
+    column: str
+) -> bool:
+    """
+    Check if column exists in DataFrame.
+    Reusable across all pipelines!
+
+    Args:
+        df: Input DataFrame
+        column: Column name to check
+                Example: "order_id"
+
+    Returns:
+        bool: True if exists
+              False if not exists
+
+    Example:
+        if column_exists(df, "order_id"):
+            df = df.withColumn(
+                "order_id",
+                trim(col("order_id"))
+            )
+    """
+    return column in df.columns

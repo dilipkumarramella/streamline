@@ -277,3 +277,69 @@ def quarantine_records(
     )
 
     return good_df, bad_df
+
+
+def validate_schema(
+    df,
+    expected_columns: list
+) -> None:
+    """
+    Validate DataFrame schema against
+    expected columns.
+    Warns DE about:
+    1. Missing columns - source stopped
+       sending data for these cols
+    2. New columns - source added
+       new cols not in expected list
+
+    Does NOT fail pipeline!
+    Just informs DE to investigate.
+
+    Args:
+        df: Input DataFrame
+        expected_columns: List of expected
+                          columns
+                          Example: ["order_id",
+                                    "customer_id"]
+
+    Returns:
+        None
+
+    Example:
+        validate_schema(
+            df=orders_df,
+            expected_columns=[
+                "order_id",
+                "customer_id",
+                "product_id",
+                "quantity",
+                "unit_price",
+                "order_status",
+                "order_timestamp",
+                "created_at"
+            ]
+        )
+    """
+    current_columns = set(df.columns)
+    expected_columns_set = set(expected_columns)
+
+    # Check missing columns
+    missing_cols = expected_columns_set - current_columns
+    if missing_cols:
+        print(
+            f"WARNING: Missing columns detected: {list(missing_cols)}. "
+            f"Source may have stopped sending these columns. "
+            f"Investigate and reprocess if needed!"
+        )
+
+    # Check new columns
+    new_cols = current_columns - expected_columns_set
+    if new_cols:
+        print(
+            f"INFO: New columns detected: {list(new_cols)}. "
+            f"Source added new columns. "
+            f"Review if silver schema needs updating!"
+        )
+
+    if not missing_cols and not new_cols:
+        print("Schema validation passed")
