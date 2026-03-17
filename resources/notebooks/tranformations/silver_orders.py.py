@@ -18,7 +18,8 @@ from resources.notebooks.utils.delta_helpers import (
     get_last_processed_version,
     update_pipeline_state,
     safe_cast,
-    column_exists
+    column_exists,
+    get_table_location
 )
 from resources.notebooks.utils.data_quality import (
     check_nulls,
@@ -389,16 +390,27 @@ def write_to_silver(good_df, bad_df, good_count, bad_count):
             )
         else:
             write_data(
+                spark=spark,
                 df=good_df,
                 file_type="delta",
-                table_name=config["silver_fact_orders"]
+                table_name=config["silver_fact_orders"],
+                location=get_table_location(
+                    config["silver_path"],
+                    config["silver_fact_orders"]
+                )
+                
             )
 
     if bad_count > 0:
         write_data(
+            spark=spark,
             df=bad_df,
             file_type="delta",
-            table_name=config["silver_orders_quarantine"]
+            table_name=config["silver_orders_quarantine"],
+            location=get_table_location(
+                config["silver_path"],
+                config["silver_orders_quarantine"]
+            )
         )
 
 # COMMAND ----------

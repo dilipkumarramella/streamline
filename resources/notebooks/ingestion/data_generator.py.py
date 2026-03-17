@@ -10,7 +10,7 @@ import sys
 sys.path.append('/Workspace/Users/dilip.dot.dot@gmail.com/streamline/')
 
 from resources.notebooks.utils.config import get_config
-from resources.notebooks.utils.delta_helpers import write_data, table_exists, enable_cdf
+from resources.notebooks.utils.delta_helpers import write_data, table_exists, enable_cdf, get_table_location
 
 from faker import Faker
 import random
@@ -168,9 +168,14 @@ def write_to_bronze(orders):
     df = df.withColumn("ingested_at", current_timestamp())
 
     write_data(
+        spark=spark,
         df=df,
         file_type="delta",
-        table_name=config["bronze_orders"]
+        table_name=config["bronze_orders"],
+        location=get_table_location(
+            config["bronze_path"],
+            config["bronze_orders"]
+        )
     )
 
     # Enable CDF only if not already enabled
@@ -309,15 +314,21 @@ def write_to_bronze_payments(payments):
     df = df.withColumn("ingested_at", current_timestamp())
 
     write_data(
+        spark=spark,
         df=df,
         file_type="delta",
-        table_name=config["bronze_payments"]
+        table_name=config["bronze_payments"],
+        location=get_table_location(
+            config["bronze_path"],
+            config["bronze_payments"]
+        )
     )
 
     # Enable CDF only if not already enabled
     enable_cdf(spark, config["bronze_payments"])
 
     print(f"Written {df.count()} records to {config['bronze_payments']}")
+    
 
 
 

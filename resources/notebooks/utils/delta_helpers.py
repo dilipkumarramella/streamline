@@ -129,7 +129,9 @@ def read_stream_data(
 # WRITE FUNCTIONS
 # -------------------------------------
 
+
 def write_data(
+    spark,
     df,
     file_type: str,
     mode: str = "append",
@@ -138,58 +140,79 @@ def write_data(
     options: dict = {}
 ) -> None:
     """
-    Reusable function to write DataFrame
-    to any data format.
+Reusable function to write DataFrame.
+Supports managed tables, external tables
+and path based writes.
 
-    Args:
-        df: Source DataFrame to write
-        file_type: "delta", "parquet", "csv"
-        mode: Write mode
-              Default: "append"
-              Options: "append", "overwrite"
-        location: ADLS path (optional)
-                  Default: None
-                  Example: "abfss://bronze@storage.net/"
-        table_name: Unity Catalog table name (optional)
-                    Default: None
-                    Example: "streamline.bronze.orders"
-                    Use this OR location, not both!
-        options: Extra spark write options
-                 Default: empty dict
-                 Example: {"header": "true"}
+Args:
+    spark: SparkSession
+           Required for external table
+           registration in Unity Catalog
+    df: Source DataFrame
+    file_type: "delta", "parquet", "csv"
+    mode: Write mode
+          Default: "append"
+          Options: "append", "overwrite"
+    location: ADLS path (optional)
+              Default: None
+              Example: "abfss://streamline@storage.dfs.core.windows.net/bronze/"
+    table_name: Unity Catalog table name (optional)
+                Default: None
+                Example: "streamline.bronze.orders"
+    options: Extra spark write options
+             Default: empty dict
 
-    Returns:
-        None
+Returns:
+    None
 
-    Example:
-        # Write by table name:
-        write_data(
-            df=orders_df,
-            file_type="delta",
-            table_name=config["bronze_orders"]
-        )
+Example:
+    # Managed table:
+    write_data(
+        spark=spark,
+        df=orders_df,
+        file_type="delta",
+        table_name=config["bronze_orders"]
+    )
 
-        # Write by path:
-        write_data(
-            df=orders_df,
-            file_type="delta",
-            location=config["bronze_path"],
-            mode="overwrite"
-        )
+    # External table:
+    write_data(
+        spark=spark,
+        df=orders_df,
+        file_type="delta",
+        table_name=config["bronze_orders"],
+        location=config["bronze_path"]
+    )
+
+    # Path only:
+    write_data(
+        spark=spark,
+        df=orders_df,
+        file_type="delta",
+        location=config["bronze_path"]
+    )
     """
-    writer = df.write.format(file_type)
 
+    writer = df.write.format(file_type)
     writer = writer.mode(mode)
-    
-    # Always merge schema for schema evolution
     writer = writer.option("mergeSchema", "true")
-    
+
     for key, value in options.items():
         writer = writer.option(key, value)
 
-    if table_name:
+    if table_name and location:
+        # External table with location
+        writer.save(location)
+        # Register in Unity Catalog
+        spark.sql(f"""
+            CREATE TABLE IF NOT EXISTS {table_name}
+            USING DELTA
+            LOCATION '{location}'
+        """)
+    elif table_name:
+        # Managed table
         writer.saveAsTable(table_name)
     elif location:
+        # Just save to path
         writer.save(location)
 
 
@@ -713,6 +736,7 @@ def update_pipeline_state(
     df = df.withColumn("last_run_time", current_timestamp())
 
     write_data(
+        spark=spark,
         df=df,
         file_type="delta",
         table_name=pipeline_state_table
@@ -796,3 +820,28 @@ def column_exists(
             )
     """
     return column in df.columns
+
+
+def get_table_location(base_path: str, table_name: str) -> str:
+    """
+    Build table location from base path
+    and full table name.
+
+    Args:
+        base_path: Layer base path
+                   Example: config["silver_path"]
+        table_name: Full UC table name
+                    Example: "streamline.silver.fact_orders"
+
+    Returns:
+        str: Full table location path
+             Example: "abfss://streamline@storage.net/silver/fact_orders/"
+    
+    Example:
+        location = get_table_location(
+            base_path=config["silver_path"],
+            table_name=config["silver_fact_orders"]
+        )
+    """
+    short_name = table_name.split(".")[-1]
+    return f"{base_path}{short_name}/"
