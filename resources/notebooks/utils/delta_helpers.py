@@ -1,5 +1,5 @@
 from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql.functions import current_date, lit, expr, current_timestamp
+from pyspark.sql.functions import current_date, lit, expr, current_timestamp, monotonically_increasing_id
 from delta.tables import DeltaTable
 from pyspark.sql.types import StructType, StructField, StringType, LongType, TimestampType
 
@@ -272,12 +272,14 @@ def scd2_merge(
     source_df,
     target_table: str,
     natural_key: str,
-    tracked_columns: list
+    tracked_columns: list,
+    surrogate_key: str = "surrogate_sk"
 ) -> None:
     """
     SCD Type 2 MERGE into Delta dimension table.
     Closes old record and inserts new record
     when tracked columns change.
+    Generates surrogate key for new records!
 
     Args:
         spark: SparkSession
@@ -288,6 +290,9 @@ def scd2_merge(
                      Example: "customer_id"
         tracked_columns: Columns to track for changes
                          Example: ["city", "customer_name"]
+        surrogate_key: Surrogate key column name
+                       Default: "surrogate_sk"
+                       Example: "customer_sk"
 
     Returns:
         None
@@ -298,12 +303,10 @@ def scd2_merge(
             source_df=customers_df,
             target_table=config["silver_dim_customer"],
             natural_key="customer_id",
-            tracked_columns=["city", "customer_name"]
+            tracked_columns=["city", "customer_name"],
+            surrogate_key="customer_sk"
         )
     """
-    from pyspark.sql.functions import current_date, lit
-    from delta.tables import DeltaTable
-
     target = DeltaTable.forName(spark, target_table)
 
     # Step 1: Build change detection condition
@@ -342,13 +345,17 @@ def scd2_merge(
         )
     ).distinct()
 
+    # Add SCD2 tracking columns
+    # and surrogate key
     new_records_df \
         .withColumn("is_current", lit(True)) \
         .withColumn("start_date", current_date()) \
         .withColumn("end_date", lit(None).cast("date")) \
+        .withColumn(surrogate_key, monotonically_increasing_id()) \
         .write \
         .format("delta") \
         .mode("append") \
+        .option("mergeSchema", "true") \
         .saveAsTable(target_table)
 
 

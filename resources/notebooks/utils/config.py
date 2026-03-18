@@ -39,7 +39,11 @@ def get_config(env: str) -> dict:
             "gold_data_quality": "streamline.gold.data_quality_metrics",
 
             # Pipeline State
-            "pipeline_state": "streamline.silver.pipeline_state"
+            "pipeline_state": "streamline.silver.pipeline_state",
+
+            # Pool tables
+            "customer_pool": "streamline.bronze.customer_pool",
+            "product_pool": "streamline.bronze.product_pool"
         },
         
         "prod": {
@@ -80,7 +84,11 @@ def get_config(env: str) -> dict:
             "gold_data_quality": "streamline.gold.data_quality_metrics",
 
             # Pipeline State
-            "pipeline_state": "streamline.silver.pipeline_state"
+            "pipeline_state": "streamline.silver.pipeline_state",
+
+            # Pool tables
+            "customer_pool": "streamline.bronze.customer_pool",
+            "product_pool": "streamline.bronze.product_pool"
         }
     }
     

@@ -36,9 +36,9 @@ from pyspark.sql.functions import (
     explode,
     trim,
     current_timestamp,
-    expr
+    expr,
+    lower
 )
-
 
 # COMMAND ----------
 
@@ -236,8 +236,9 @@ def drop_unnecessary_columns(df):
         "payment_method",  # goes to fact_payments
         "payment_status",  # goes to fact_payments
         "product_name",    # goes to dim_product
-        "category",         # goes to dim_product
-        "ingested_at"      # bronze only
+        "category",        # goes to dim_product
+        "ingested_at",     # bronze only
+        "run_number"       # For SCD2
     )
 
     return df
@@ -272,13 +273,13 @@ def clean_data(df):
     
     # Trim string columns
     if column_exists(df, "order_id"):
-        df = df.withColumn("order_id", trim(col("order_id")))
+        df = df.withColumn("order_id", lower(trim(col("order_id"))))
     if column_exists(df, "customer_id"):
-        df = df.withColumn("customer_id", trim(col("customer_id")))
+        df = df.withColumn("customer_id", lower(trim(col("customer_id"))))
     if column_exists(df, "product_id"):
-        df = df.withColumn("product_id", trim(col("product_id")))
+        df = df.withColumn("product_id", lower(trim(col("product_id"))))
     if column_exists(df, "order_status"):
-        df = df.withColumn("order_status", trim(col("order_status")))
+        df = df.withColumn("order_status", lower(trim(col("order_status"))))
 
     # Safe cast
     df = safe_cast(df, "order_id", "string")
@@ -349,7 +350,7 @@ def run_quality_checks(df):
             "order_status": [
                 "delivered", "pending",
                 "cancelled", "returned",
-                "Unknown"
+                "unknown"
             ]
         }
     )
