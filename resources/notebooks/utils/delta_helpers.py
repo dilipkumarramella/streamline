@@ -687,15 +687,17 @@ def update_pipeline_state(
     pipeline_state_table: str,
     pipeline_name: str,
     last_processed_version: int,
-    status: str = "success"
+    status: str = "success",
+    good_record_count: int = 0,
+    bad_record_count: int = 0
 ) -> None:
     """
     Update pipeline state after each run.
-    Tracks last processed bronze version
-    for incremental CDF reads.
+    Tracks last processed version, run status,
+    and record counts for observability.
     Appends new row every run for
     full audit history!
-
+ 
     Args:
         spark: SparkSession
         pipeline_state_table: State table name
@@ -708,37 +710,54 @@ def update_pipeline_state(
         status: Pipeline run status
                 Default: "success"
                 Options: "success", "failed"
-
+        good_record_count: Records written to silver
+                           Default: 0
+                           Pass 0 if pipeline failed
+        bad_record_count: Records rejected by quality checks
+                          Default: 0
+                          For pipelines without quarantine
+                          (clickstream, dims) always 0
+                          Not 0 does NOT mean quarantine table
+                          exists - just means records were
+                          rejected during quality checks
+ 
     Returns:
         None
-
+ 
     Example:
-        # On success:
+        # Success with counts:
         update_pipeline_state(
             spark=spark,
             pipeline_state_table=config["pipeline_state"],
             pipeline_name="bronze_to_silver_orders",
             last_processed_version=120,
-            status="success"
+            status="success",
+            good_record_count=good_count,
+            bad_record_count=bad_count
         )
-
+ 
         # On failure:
         update_pipeline_state(
             spark=spark,
             pipeline_state_table=config["pipeline_state"],
             pipeline_name="bronze_to_silver_orders",
             last_processed_version=0,
-            status="failed"
+            status="failed",
+            good_record_count=0,
+            bad_record_count=0
         )
     """
     schema = StructType([
         StructField("pipeline_name", StringType(), False),
         StructField("last_processed_version", LongType(), False),
         StructField("last_run_time", TimestampType(), True),
-        StructField("status", StringType(), True)
+        StructField("status", StringType(), True),
+        StructField("good_record_count", LongType(), True),
+        StructField("bad_record_count", LongType(), True)
+
     ])
 
-    data = [(pipeline_name, last_processed_version, None, status)]
+    data = [(pipeline_name, last_processed_version, None, status, good_record_count, bad_record_count)]
     df = spark.createDataFrame(data, schema)
     df = df.withColumn("last_run_time", current_timestamp())
 
@@ -748,8 +767,14 @@ def update_pipeline_state(
         file_type="delta",
         table_name=pipeline_state_table
     )
-
-    print(f"Pipeline state updated: {pipeline_name} | version {last_processed_version} | {status}")
+    enable_cdf(spark, pipeline_state_table)
+    print(
+        f"Pipeline state updated: {pipeline_name} | "
+        f"version {last_processed_version} | "
+        f"good records: {good_record_count} | "
+        f"bad records: {bad_record_count} | "
+        f"{status}"
+    )
 
 
 # ─────────────────────────────────

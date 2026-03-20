@@ -18,7 +18,8 @@ from resources.notebooks.utils.delta_helpers import (
     safe_cast,
     column_exists,
     get_table_location,
-    scd2_merge
+    scd2_merge,
+    read_data
 )
 from resources.notebooks.utils.data_quality import (
     check_nulls,
@@ -96,8 +97,11 @@ def read_bronze_customers():
     """
     # Check bronze exists first!
     if not table_exists(spark, config["bronze_orders"]):
-        print("Bronze orders table not found - exiting pipeline")
-        return None
+        raise Exception(
+            f"Source table {config['bronze_orders']} not found. "
+            f"Upstream ingestion pipeline may have failed. "
+            f"Verify bronze layer before retrying."
+        )
 
     # Backfill / Reprocessing mode
     if start_datetime and end_datetime:
@@ -178,6 +182,11 @@ def read_bronze_customers():
                     "run_number"
                 )
             )
+
+    cdf_cols = ["_change_type", "_commit_version", "_commit_timestamp"]
+    for c in cdf_cols:
+        if column_exists(df, c):
+            df = df.drop(c)
 
     return df
 
@@ -337,7 +346,8 @@ def run_quality_checks(df):
             "city",
             "state",
             "created_at"
-        ]
+        ],
+        critical_columns=["customer_id"]
     )
 
     # Check nulls on critical columns
@@ -482,6 +492,9 @@ def run_pipeline():
     SCD2 for customer dimension!
     No quarantine for dim tables!
     """
+    good_count = 0
+    bad_count  = 0
+    
     try:
         print("Starting silver customers dim pipeline...")
 
@@ -540,8 +553,6 @@ def run_pipeline():
         ).count()
 
         good_count = good_df.count()
-        print(f"Good records: {good_count}")
-        print(f"Bad records dropped: {bad_count}")
 
         # Write
         if good_count == 0:
@@ -556,7 +567,9 @@ def run_pipeline():
             pipeline_state_table=config["pipeline_state"],
             pipeline_name="bronze_to_silver_dim_customer",
             last_processed_version=current_version,
-            status="success"
+            status="success",
+            good_record_count = good_count,
+            bad_record_count = bad_count
         )
 
         # Optimize

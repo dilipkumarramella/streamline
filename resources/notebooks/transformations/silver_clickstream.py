@@ -19,7 +19,8 @@ from resources.notebooks.utils.delta_helpers import (
     update_pipeline_state,
     safe_cast,
     column_exists,
-    get_table_location
+    get_table_location,
+    enable_cdf
 )
 from resources.notebooks.utils.data_quality import (
     check_nulls,
@@ -116,8 +117,11 @@ def read_bronze_clickstream():
 
     # Check bronze exists first!
     if not table_exists(spark, config["bronze_clickstream"]):
-        print("Bronze clickstream table not found - exiting pipeline")
-        return None
+        raise Exception(
+            f"Source table {config['bronze_clickstream']} not found. "
+            f"Upstream ingestion pipeline may have failed. "
+            f"Verify bronze layer before retrying."
+        )
 
     # Backfill / Reprocessing mode
     if start_datetime and end_datetime:
@@ -180,6 +184,11 @@ def read_bronze_clickstream():
                 file_type="delta",
                 table_name=config["bronze_clickstream"]
             )
+
+    cdf_cols = ["_change_type", "_commit_version", "_commit_timestamp"]
+    for c in cdf_cols:
+        if column_exists(df, c):
+            df = df.drop(c)
 
     return df
 
@@ -288,7 +297,8 @@ def run_quality_checks(df):
             "event_timestamp",
             "device",
             "created_at"
-        ]
+        ],
+        critical_columns=["event_id", "session_id", "customer_id"]
     )
 
     # Check nulls on critical columns
@@ -374,6 +384,8 @@ def write_to_silver(good_df, good_count):
                     config["silver_fact_events"]
                 )
             )
+            # Enable CDF only if not already enabled
+            enable_cdf(spark, config["silver_fact_events"])
 
 # COMMAND ----------
 
@@ -417,6 +429,8 @@ def run_pipeline():
     Handles errors and pipeline state.
     No quarantine for clickstream!
     """
+    good_count = 0
+    bad_count  = 0
     try:
         print("Starting silver clickstream pipeline...")
 
@@ -458,9 +472,6 @@ def run_pipeline():
         ).count()
         good_count = good_df.count()
 
-        print(f"Good records: {good_count}")
-        print(f"Bad records dropped: {bad_count}")
-
         # Write
         if good_count == 0:
             print("No records to write - skipping")
@@ -474,7 +485,9 @@ def run_pipeline():
             pipeline_state_table=config["pipeline_state"],
             pipeline_name="bronze_to_silver_clickstream",
             last_processed_version=current_version,
-            status="success"
+            status="success",
+            good_record_count = good_count,
+            bad_record_count = bad_count
         )
 
         # Optimize

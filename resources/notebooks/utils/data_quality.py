@@ -281,26 +281,36 @@ def quarantine_records(
 
 def validate_schema(
     df,
-    expected_columns: list
+    expected_columns: list,
+    critical_columns: list = []
 ) -> None:
     """
     Validate DataFrame schema against
     expected columns.
-    Warns DE about:
-    1. Missing columns - source stopped
-       sending data for these cols
-    2. New columns - source added
-       new cols not in expected list
 
-    Does NOT fail pipeline!
-    Just informs DE to investigate.
+    Two levels of validation:
+    1. Critical columns missing - FAIL pipeline
+       Primary keys and mandatory fields
+       Pipeline cannot produce correct data
+       without these columns
+    2. Non-critical columns missing - WARN only
+       Source may have stopped sending these
+       Investigate and reprocess if needed
+    3. New columns - INFO only
+       Source added new columns
+       mergeSchema handles automatically
 
     Args:
         df: Input DataFrame
-        expected_columns: List of expected
-                          columns
+        expected_columns: List of all expected columns
                           Example: ["order_id",
                                     "customer_id"]
+        critical_columns: Columns that must exist
+                          Pipeline fails if missing
+                          Default: empty list
+                          Example: ["order_id",
+                                    "customer_id",
+                                    "product_id"]
 
     Returns:
         None
@@ -317,22 +327,38 @@ def validate_schema(
                 "order_status",
                 "order_timestamp",
                 "created_at"
+            ],
+            critical_columns=[
+                "order_id",
+                "customer_id",
+                "product_id"
             ]
         )
     """
-    current_columns = set(df.columns)
+    current_columns      = set(df.columns)
     expected_columns_set = set(expected_columns)
+    missing_cols         = expected_columns_set - current_columns
 
-    # Check missing columns
-    missing_cols = expected_columns_set - current_columns
-    if missing_cols:
+    # Critical columns missing - fail pipeline
+    if critical_columns:
+        missing_critical = set(critical_columns) - current_columns
+        if missing_critical:
+            raise Exception(
+                f"Critical columns missing: {list(missing_critical)}. "
+                f"Source schema has changed - investigate immediately!"
+            )
+
+    # Non-critical columns missing - warn only
+    missing_non_critical = missing_cols - set(critical_columns)
+    if missing_non_critical:
         print(
-            f"WARNING: Missing columns detected: {list(missing_cols)}. "
+            f"WARNING: Non-critical columns missing: "
+            f"{list(missing_non_critical)}. "
             f"Source may have stopped sending these columns. "
             f"Investigate and reprocess if needed!"
         )
 
-    # Check new columns
+    # New columns - info only
     new_cols = current_columns - expected_columns_set
     if new_cols:
         print(
