@@ -1,6 +1,0 @@
-resources:
-  schemas:
-    bronze_schema:
-      name: bronze
-      catalog_name: ${var.catalog}
-      comment: "Raw storage layer"

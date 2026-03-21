@@ -1,0 +1,51 @@
+resources:
+  jobs:
+    streamline_clickstream_pipeline:
+      name: streamline_clickstream_pipeline
+      tasks:
+        - task_key: silver_clickstream
+          notebook_task:
+            notebook_path: ../notebooks/transformations/silver_clickstream
+            source: WORKSPACE
+          job_cluster_key: Job_cluster
+          max_retries: 2
+          min_retry_interval_millis: 300000
+        - task_key: gold_funnel_metrics
+          depends_on:
+            - task_key: silver_clickstream
+          notebook_task:
+            notebook_path: ../notebooks/aggregations/gold_funnel_metrics
+            source: WORKSPACE
+          job_cluster_key: Job_cluster
+          max_retries: 2
+          min_retry_interval_millis: 300000
+      job_clusters:
+        - job_cluster_key: Job_cluster
+          new_cluster:
+            cluster_name: ""
+            spark_version: 17.3.x-scala2.13
+            azure_attributes:
+              first_on_demand: 1
+              spot_bid_max_price: -1
+            node_type_id: Standard_D4ds_v5
+            spark_env_vars:
+              PYSPARK_PYTHON: /databricks/python3/bin/python3
+            data_security_mode: DATA_SECURITY_MODE_DEDICATED
+            runtime_engine: STANDARD
+            kind: CLASSIC_PREVIEW
+            is_single_node: true
+      queue:
+        enabled: true
+      parameters:
+        - name: env
+          default: ${var.env}
+        - name: end_datetime
+          default: ""
+        - name: start_datetime
+          default: ""
+        - name: start_date
+          default: ""
+        - name: end_date
+          default: ""
+      run_as:
+        service_principal_name: ${var.service_principal_id}

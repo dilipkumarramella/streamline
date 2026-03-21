@@ -1,0 +1,19 @@
+resources:
+  pipelines:
+    pipeline_streamline_dlt_pipeline:
+      name: streamline_dlt_pipeline
+      clusters:
+        - label: default
+          driver_node_type_id: Standard_D4ds_v5
+          num_workers: 0
+      libraries:
+        - glob:
+            include: ../notebooks/dlt/gold_streaming.py
+      schema: gold
+      continuous: true
+      catalog: streamline
+      root_path: ../notebooks/dlt
+      configuration:
+        env: ${var.env}
+      run_as:
+        service_principal_name: ${var.service_principal_id}

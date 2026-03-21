@@ -1,6 +1,0 @@
-resources:
-  schemas:
-    silver_schema:
-      name: silver
-      catalog_name: ${var.catalog}
-      comment: "Cleaned and transformed data layer"
