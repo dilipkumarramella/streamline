@@ -7,6 +7,8 @@ resources:
           notebook_task:
             notebook_path: ../notebooks/transformations/silver_clickstream.py
             source: WORKSPACE
+            base_parameters:
+              bundle_root: ${workspace.file_path}
           job_cluster_key: Job_cluster
           max_retries: 2
           min_retry_interval_millis: 300000
@@ -16,6 +18,8 @@ resources:
           notebook_task:
             notebook_path: ../notebooks/aggregations/gold_funnel_metrics.py
             source: WORKSPACE
+            base_parameters:
+              bundle_root: ${workspace.file_path}
           job_cluster_key: Job_cluster
           max_retries: 2
           min_retry_interval_millis: 300000

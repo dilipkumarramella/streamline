@@ -7,7 +7,8 @@ targets:
     permissions:
       - user_name: dilip.dot.dot@gmail.com
         level: CAN_MANAGE
+      - user_name: dilip.dot.dot_gmail.com#ext#@dilipdotdotgmail.onmicrosoft.com
+        level: CAN_MANAGE
         
     presets:
         name_prefix: "[prod]"
-        source_linked_deployment: false

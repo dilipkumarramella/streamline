@@ -20,5 +20,6 @@ resources:
       root_path: ../notebooks/dlt
       configuration:
         env: ${var.env}
+        bundle_root: ${workspace.file_path}
       run_as:
         service_principal_name: ${var.service_principal_id}

@@ -1,7 +1,8 @@
 import dlt
 import sys
  
-sys.path.append('/Workspace/Users/dilip.dot.dot@gmail.com/streamline/')
+bundle_root = spark.conf.get("bundle_root")
+sys.path.append(bundle_root)
  
 from resources.notebooks.utils.config import get_config
 from pyspark.sql.functions import (

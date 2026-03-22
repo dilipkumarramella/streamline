@@ -10,6 +10,8 @@ resources:
           notebook_task:
             notebook_path: ../notebooks/ingestion/data_generator.py
             source: WORKSPACE
+            base_parameters:
+              bundle_root: ${workspace.file_path}
           job_cluster_key: Job_cluster
       job_clusters:
         - job_cluster_key: Job_cluster

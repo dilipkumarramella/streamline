@@ -7,7 +7,8 @@
 # IMPORTS
 # ─────────────────────────────────
 import sys
-sys.path.append('/Workspace/Users/dilip.dot.dot@gmail.com/streamline/')
+bundle_root = dbutils.widgets.get("bundle_root")
+sys.path.append(bundle_root)
 
 from resources.notebooks.utils.config import get_config
 from resources.notebooks.utils.delta_helpers import write_data, table_exists, enable_cdf, get_table_location,column_exists
