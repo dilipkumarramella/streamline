@@ -1,0 +1,13 @@
+targets:
+  dev:
+    variables:
+      env: dev
+
+    permissions:
+      - user_name: dilip.dot.dot@gmail.com
+        level: CAN_MANAGE
+      - user_name: dilip.dot.dot_gmail.com#ext#@dilipdotdotgmail.onmicrosoft.com
+        level: CAN_MANAGE
+        
+    presets:
+      name_prefix: "[dev ${workspace.current_user.short_name}]"

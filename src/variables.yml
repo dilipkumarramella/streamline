@@ -1,0 +1,16 @@
+variables:
+  dev_workspace:
+    default: "https://adb-7405604613583163.3.azuredatabricks.net/"
+  prod_workspace:
+    default: ""
+  env:
+    description: "Deployment environment"
+    default: dev
+  catalog:
+    description: "Unity Catalog name"
+    default: streamline
+  run_as_user:
+    default: "dilip.dot.dot_gmail.com#ext#@dilipdotdotgmail.onmicrosoft.com"
+  service_principal_id:
+    default: "b7cf2661-4e6b-4dbb-a8f8-a5429a9a8d15"
+

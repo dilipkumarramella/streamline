@@ -1,0 +1,16 @@
+resources:
+  schemas:
+    bronze_schema:
+      name: bronze
+      catalog_name: ${var.catalog}
+      comment: "Raw storage layer - ingested data from Kafka and data generator"
+
+    silver_schema:
+      name: silver
+      catalog_name: ${var.catalog}
+      comment: "Cleaned and transformed data layer with quality checks and SCD2"
+
+    gold_schema:
+      name: gold
+      catalog_name: ${var.catalog}
+      comment: "Aggregated and curated data layer for business reporting and dashboards"
