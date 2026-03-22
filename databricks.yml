@@ -14,10 +14,10 @@ targets:
     mode: development
     default: true
     workspace: 
-      host: ${var.dev_workspace}
+      host: https://adb-7405604613583163.3.azuredatabricks.net
     
   prod:
     mode: production
     default: false
     workspace:
-      host: ${var.prod_workspace}
+      host: https://
