@@ -21,7 +21,7 @@ resources:
             - task_key: streamline_orders_silver
             - task_key: streamline_customers_pipeline
           notebook_task:
-            notebook_path: ../notebooks/aggregations/gold_customer_360
+            notebook_path: ../notebooks/aggregations/gold_customer_360.py
             source: WORKSPACE
           job_cluster_key: Job_cluster
           max_retries: 2
@@ -38,7 +38,7 @@ resources:
             - task_key: streamline_products_pipeline
             - task_key: streamline_customers_pipeline
           notebook_task:
-            notebook_path: ../notebooks/aggregations/gold_orders_daily_summary
+            notebook_path: ../notebooks/aggregations/gold_orders_daily_summary.py
             source: WORKSPACE
           job_cluster_key: Job_cluster
           max_retries: 2
@@ -51,7 +51,7 @@ resources:
             - task_key: streamline_orders_silver
             - task_key: streamline_customers_pipeline
           notebook_task:
-            notebook_path: ../notebooks/aggregations/gold_quality_metrics
+            notebook_path: ../notebooks/aggregations/gold_quality_metrics.py
             source: WORKSPACE
           job_cluster_key: Job_cluster
           max_retries: 2

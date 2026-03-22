@@ -8,7 +8,7 @@ resources:
       tasks:
         - task_key: data_generator__and_bronze
           notebook_task:
-            notebook_path: ../notebooks/ingestion/data_generator
+            notebook_path: ../notebooks/ingestion/data_generator.py
             source: WORKSPACE
           job_cluster_key: Job_cluster
       job_clusters:

@@ -5,7 +5,7 @@ resources:
       tasks:
         - task_key: silver_products
           notebook_task:
-            notebook_path: ../notebooks/transformations/silver_products
+            notebook_path: ../notebooks/transformations/silver_products.py
             source: WORKSPACE
           job_cluster_key: Job_cluster
           max_retries: 2

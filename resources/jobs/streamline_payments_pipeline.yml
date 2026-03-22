@@ -5,7 +5,7 @@ resources:
       tasks:
         - task_key: silver_payments
           notebook_task:
-            notebook_path: ../notebooks/transformations/silver_payments
+            notebook_path: ../notebooks/transformations/silver_payments.py
             source: WORKSPACE
           job_cluster_key: Job_cluster
           max_retries: 2
@@ -14,7 +14,7 @@ resources:
           depends_on:
             - task_key: silver_payments
           notebook_task:
-            notebook_path: ../notebooks/aggregations/gold_payment_success_rate
+            notebook_path: ../notebooks/aggregations/gold_payment_success_rate.py
             source: WORKSPACE
           job_cluster_key: Job_cluster
           max_retries: 2
