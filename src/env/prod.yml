@@ -1,0 +1,13 @@
+targets:
+  prod:
+
+    variables:
+      env: prod
+
+    permissions:
+      - user_name: dilip.dot.dot@gmail.com
+        level: CAN_MANAGE
+        
+    presets:
+        name_prefix: "[prod]"
+        source_linked_deployment: false

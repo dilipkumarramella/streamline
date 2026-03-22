@@ -1,0 +1,12 @@
+targets:
+  dev:
+    variables:
+      env: dev
+
+    permissions:
+      - user_name: dilip.dot.dot@gmail.com
+        level: CAN_MANAGE
+        
+    presets:
+      name_prefix: "[dev]"
+      source_linked_deployment: true
