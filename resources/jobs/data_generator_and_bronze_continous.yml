@@ -3,7 +3,7 @@ resources:
     data_generator_and_bronze_continuous:
       name: data_generator_and_bronze_continuous
       continuous:
-        pause_status: UNPAUSED
+        pause_status: PAUSED
         task_retry_mode: ON_FAILURE
       tasks:
         - task_key: data_generator__and_bronze
