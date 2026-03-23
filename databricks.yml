@@ -15,7 +15,7 @@ targets:
     default: true
     workspace: 
       host: https://adb-7405604613583163.3.azuredatabricks.net
-      state_path: /Workspace/Shared/streamline/.bundle/dev
+      state_path: ~/.bundle/streamline/dev
     
   prod:
     mode: production
