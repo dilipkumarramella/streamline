@@ -9,6 +9,12 @@ variables:
   catalog:
     description: "Unity Catalog name"
     default: streamline
+  bronze_schema:
+    default: bronze
+  silver_schema:
+    default: silver
+  gold_schema:
+    default: gold
   run_as_user:
     default: "dilip.dot.dot_gmail.com#ext#@dilipdotdotgmail.onmicrosoft.com"
   service_principal_id:
