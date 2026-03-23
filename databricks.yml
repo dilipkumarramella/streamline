@@ -15,9 +15,11 @@ targets:
     default: true
     workspace: 
       host: https://adb-7405604613583163.3.azuredatabricks.net
+      state_path: /Workspace/Users/dilip.dot.dot_gmail.com#ext#@dilipdotdotgmail.onmicrosoft.com/.bundle/streamline/dev
     
   prod:
     mode: production
     default: false
     workspace:
       host: https://
+      state_path: /Workspace/Shared/streamline/.bundle/prod
