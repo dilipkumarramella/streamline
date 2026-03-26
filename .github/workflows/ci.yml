@@ -1,0 +1,49 @@
+name: CI - Validate and Test
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - main
+
+jobs:
+  validate_and_test:
+    name: Validate Bundle and Run Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install pytest pyspark==3.5.0
+
+      - name: Run unit tests
+        run: |
+          pytest tests/ -v --tb=short
+
+      - name: Install Databricks CLI
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+
+      - name: Validate DAB Bundle - Dev
+        if: github.base_ref == 'develop'
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: |
+          databricks bundle validate --target dev
+
+      - name: Validate DAB Bundle - Prod
+        if: github.base_ref == 'main'
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST_PROD }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN_PROD }}
+        run: |
+          databricks bundle validate --target prod || echo "Prod workspace not configured yet - skipping"

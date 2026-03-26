@@ -1,0 +1,11 @@
+targets:
+  prod:
+
+    variables:
+      env: prod
+
+    permissions:
+      - user_name: dilip.dot.dot@gmail.com
+        level: CAN_MANAGE
+      - user_name: dilip.dot.dot_gmail.com#ext#@dilipdotdotgmail.onmicrosoft.com
+        level: CAN_MANAGE
