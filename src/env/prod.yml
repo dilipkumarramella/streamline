@@ -9,6 +9,3 @@ targets:
         level: CAN_MANAGE
       - user_name: dilip.dot.dot_gmail.com#ext#@dilipdotdotgmail.onmicrosoft.com
         level: CAN_MANAGE
-        
-    presets:
-        name_prefix: "[prod]"

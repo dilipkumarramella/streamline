@@ -2,6 +2,9 @@ resources:
   jobs:
     streamline_orders_silver:
       name: streamline_orders_silver
+      email_notifications:
+        on_failure:
+          - dilip.dot.dot@gmail.com
       tasks:
         - task_key: Silver_Orders
           notebook_task:

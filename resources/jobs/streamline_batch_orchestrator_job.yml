@@ -2,6 +2,9 @@ resources:
   jobs:
     streamline_batch_orchestrator_job:
       name: streamline_batch_orchestrator_job
+      email_notifications:
+        on_failure:
+          - dilip.dot.dot@gmail.com
       schedule:
         quartz_cron_expression: 49 0 2 * * ?
         timezone_id: Asia/Calcutta

@@ -2,6 +2,9 @@ resources:
   jobs:
     streamline_products_pipeline:
       name: streamline_products_pipeline
+      email_notifications:
+        on_failure:
+          - dilip.dot.dot@gmail.com
       tasks:
         - task_key: silver_products
           notebook_task:
