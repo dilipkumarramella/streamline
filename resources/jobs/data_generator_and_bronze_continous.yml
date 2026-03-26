@@ -2,6 +2,9 @@ resources:
   jobs:
     data_generator_and_bronze_continuous:
       name: data_generator_and_bronze_continuous
+      email_notifications:
+        on_failure:
+          - dilip.dot.dot@gmail.com
       continuous:
         pause_status: PAUSED
         task_retry_mode: ON_FAILURE

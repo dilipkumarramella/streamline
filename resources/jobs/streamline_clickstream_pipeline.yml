@@ -2,6 +2,9 @@ resources:
   jobs:
     streamline_clickstream_pipeline:
       name: streamline_clickstream_pipeline
+      email_notifications:
+        on_failure:
+          - dilip.dot.dot@gmail.com
       tasks:
         - task_key: silver_clickstream
           notebook_task:

@@ -10,23 +10,29 @@ import sys
 bundle_root = dbutils.widgets.get("bundle_root")
 sys.path.append(bundle_root)
 
+ 
 from resources.notebooks.utils.config import get_config
-from resources.notebooks.utils.delta_helpers import write_data, table_exists, enable_cdf, get_table_location,column_exists
-
+from resources.notebooks.utils.delta_helpers import (
+    write_data,
+    table_exists,
+    enable_cdf,
+    get_table_location,
+    column_exists
+)
+from resources.notebooks.utils.schema_def import (
+    item_schema,
+    order_schema,
+    payment_schema,
+    clickstream_schema
+)
+ 
 from faker import Faker
 import random
 import uuid
 from datetime import datetime, timedelta
 import time
-
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import current_timestamp, col, explode
-
-from pyspark.sql.types import (
-    StructType, StructField, StringType,
-    TimestampType, IntegerType, DoubleType,
-    ArrayType, LongType
-)
+ 
+from pyspark.sql.functions import current_timestamp, col
 
 # COMMAND ----------
 
@@ -36,6 +42,9 @@ from pyspark.sql.types import (
 # env = dbutils.widgets.get("env")
 config = get_config(env="dev")
 fake = Faker('en_IN')
+
+dbutils.widgets.text("sleep_seconds", "1")
+SLEEP_SECONDS = int(dbutils.widgets.get("sleep_seconds"))
 
 # COMMAND ----------
 
@@ -61,54 +70,6 @@ DEVICES = ["mobile", "desktop", "tablet", "unknown"]
 # appear across multiple orders!
 CUSTOMER_POOL_SIZE = 400
 PRODUCT_POOL_SIZE = 150
-
-# COMMAND ----------
-
-item_schema = StructType([
-    StructField("product_id",StringType(),True),
-    StructField("product_name",StringType(),True),
-    StructField("category",StringType(),True),
-    StructField("quantity",IntegerType(),True),
-    StructField("unit_price",DoubleType(),True),
-    StructField("run_number",LongType(),True)
-])
-
-order_schema = StructType([
-    StructField("order_id",StringType(),False),
-    StructField("order_timestamp",TimestampType(),True),
-    StructField("order_status",StringType(),True),
-    StructField("customer_id",StringType(),True),
-    StructField("customer_name",StringType(),True),
-    StructField("city",StringType(),True),
-    StructField("state",StringType(),True),
-    StructField("items",ArrayType(item_schema),True),
-    StructField("payment_method",StringType(),True),
-    StructField("payment_status",StringType(),True),
-    StructField("run_number",LongType(),True)
-])
-
-payment_schema = StructType([
-    StructField("payment_id",StringType(),False),
-    StructField("order_id",StringType(),False),
-    StructField("customer_id",StringType(),True),
-    StructField("payment_method",StringType(),True),
-    StructField("payment_status",StringType(),True),
-    StructField("payment_timestamp",TimestampType(),True),
-    StructField("amount",DoubleType(),True),
-    StructField("transaction_id",StringType(),True),
-    StructField("gateway_response_code",StringType(),True),
-    StructField("retry_count",IntegerType(),True)
-])
-
-clickstream_schema = StructType([
-    StructField("event_id",StringType(),False),
-    StructField("session_id",StringType(),True),
-    StructField("customer_id",StringType(),True),
-    StructField("event_type",StringType(),True),
-    StructField("product_id",StringType(),True),
-    StructField("event_timestamp",TimestampType(),True),
-    StructField("device",StringType(),True)
-])
 
 # COMMAND ----------
 
@@ -334,10 +295,15 @@ def inject_bad_order(order, bad_type, product_pool):
 # ─────────────────────────────────
 # WRITE TO ORDERS BRONZE
 # ─────────────────────────────────
-def write_to_bronze_orders(orders):
-    """Convert orders to DataFrame and write to bronze.orders"""
+def write_to_bronze_orders(orders: list):
+    """
+    Convert orders list to DataFrame and
+    write to bronze.orders table.
+    Adds ingested_at audit column.
+    Enables CDF if not already enabled.
+    """
 
-    df = spark.createDataFrame([orders], schema=order_schema)
+    df = spark.createDataFrame(orders, schema=order_schema)
 
     # Add ingested_at
     df = df.withColumn("ingested_at", current_timestamp())
@@ -356,28 +322,7 @@ def write_to_bronze_orders(orders):
     # Enable CDF only if not already enabled
     enable_cdf(spark, config["bronze_orders"])
 
-    print(f"Order written to {config['bronze_orders']} | order_id: {orders['order_id']}")
-
-# COMMAND ----------
-
-# ────────────────────────────────────────────
-# HELPER FUNCTIONS FOR GENERATING PAYMENTS DATA
-# ────────────────────────────────────────────
-
-def get_latest_order_from_bronze():
-    """
-    Return latest order_id and customer_id
-    from bronze for payment referential integrity.
-    Gets most recent order written this run.
-    """
-    return spark.table(
-        config["bronze_orders"]
-    ).select(
-        "order_id",
-        "customer_id"
-    ).orderBy(
-        col("ingested_at").desc()
-    ).limit(1).collect()
+    print(f"Order written to {config['bronze_orders']} | order_id: {orders[0]['order_id']}")
 
 # COMMAND ----------
 
@@ -385,22 +330,25 @@ def get_latest_order_from_bronze():
 # GENERATE PAYMENTS DATA
 # ─────────────────────────────────
 
-def generate_payment(orders):
+def generate_payment(order: dict):
     """
-    Generate one payment record.
+    Generate one payment record linked to order.
+    Accepts order dict directly for referential
+    integrity - no bronze read needed!
+    order_id and customer_id sourced from
+    the same order generated in this iteration.
     Randomly injects bad data based on
     BAD_DATA_PERCENTAGE for this run.
     Sequential timestamp via get_next_timestamp().
     Weighted payment_status - realistic distribution:
     80% success, 12% failed, 8% pending.
     """
-    random_order = random.choice(orders)
     timestamp    = get_next_timestamp()
  
     payment = {
         "payment_id":            str(uuid.uuid4()),
-        "order_id":              random_order.order_id,
-        "customer_id":           random_order.customer_id,
+        "order_id":              order["order_id"],
+        "customer_id":           order["customer_id"],
         "payment_method":        random.choice(PAYMENT_METHODS),
         "payment_status":        random.choices(
                                      PAYMENT_STATUSES,
@@ -434,11 +382,12 @@ def generate_payment(orders):
         payment  = inject_bad_payment(payment, bad_type)
  
     return payment
- 
- 
+
 def inject_bad_payment(payment, bad_type):
-    """Inject specific bad data into payment."""
- 
+    """
+    Inject specific bad data into payment.
+    Called only when random() < BAD_DATA_PERCENTAGE.
+    """
     if bad_type == "null_payment_id":
         payment["payment_id"] = None
  
@@ -466,10 +415,10 @@ def inject_bad_payment(payment, bad_type):
 # WRITE TO PAYMENTS BRONZE
 # ─────────────────────────────────
 
-def write_to_bronze_payments(payments):
+def write_to_bronze_payments(payments: list):
     """Write payments to bronze.payments table."""
 
-    df = spark.createDataFrame([payments], schema=payment_schema)
+    df = spark.createDataFrame(payments, schema=payment_schema)
     df = df.withColumn("ingested_at", current_timestamp())
 
     write_data(
@@ -486,7 +435,7 @@ def write_to_bronze_payments(payments):
     # Enable CDF only if not already enabled
     enable_cdf(spark, config["bronze_payments"])
 
-    print(f"Payment written to {config['bronze_payments']} | payment_id: {payments['payment_id']}")
+    print(f"Payment written to {config['bronze_payments']} | payment_id: {payments[0]['payment_id']}")
 
 
 # COMMAND ----------
@@ -574,10 +523,10 @@ def inject_bad_event(event, bad_type):
 # WRITE TO CLICKSTREAM BRONZE
 # ─────────────────────────────────
 
-def write_to_bronze_clickstream(events):
+def write_to_bronze_clickstream(events: list):
     """Write clickstream events to bronze.clickstream table."""
 
-    df = spark.createDataFrame([events], schema=clickstream_schema)
+    df = spark.createDataFrame(events, schema=clickstream_schema)
     df = df.withColumn("ingested_at", current_timestamp())
 
     write_data(
@@ -594,47 +543,52 @@ def write_to_bronze_clickstream(events):
     # Enable CDF only if not already enabled
     enable_cdf(spark, config["bronze_clickstream"])
 
-    print(f"Event written to {config['bronze_clickstream']} | event_id: {events['event_id']}")
+    print(f"Event written to {config['bronze_clickstream']} | event_id: {events[0]['event_id']}")
 
 # COMMAND ----------
 
 # ─────────────────────────────────
 # MAIN
 # ─────────────────────────────────
+ 
 def run_pipeline():
     """
     Main pipeline function.
-    Generates exactly 1 record per table per run.
-    Designed to be scheduled every 30-60 seconds
-    via Databricks Jobs for continuous streaming.
+    Runs continuously until job is manually stopped.
+    Pools loaded once at start - not every iteration!
+    No optimize - vacuum job handles maintenance.
  
     Flow:
-    1. Load customer and product pools
-    2. Generate 1 order with sequential timestamp
-    3. Write order to bronze
-    4. Generate 1 payment linked to latest bronze order
-    5. Write payment to bronze
-    6. Generate 1 clickstream event linked to latest bronze order
-    7. Write event to bronze
+    1. Load customer and product pools (once)
+    2. Loop forever every SLEEP_SECONDS:
+       a. Generate 1 order
+       b. Generate 1 payment linked to same order dict
+          (referential integrity without bronze read)
+       c. Generate 1 clickstream event from pools
+       d. Write all 3 to bronze
+       e. Sleep SLEEP_SECONDS
+ 
+    Widget:
+        sleep_seconds: Seconds to sleep between runs
+                       Default: 30
+                       Lower = more data = more credits!
     """
-    # Get or create pools
     customer_pool = get_or_create_customer_pool()
     product_pool  = get_or_create_product_pool()
  
-    # Generate and write 1 order
-    order = generate_order(customer_pool, product_pool)
-    write_to_bronze_orders(order)
+    run_count = 0
+    while True:
+        order   = generate_order(customer_pool, product_pool)
+        payment = generate_payment(order)
+        event   = generate_event(customer_pool, product_pool)
  
-    # Generate and write 1 payment
-    # Reads latest order from bronze for referential integrity
-    bronze_orders = get_latest_order_from_bronze()
-    payment       = generate_payment(bronze_orders)
-    write_to_bronze_payments(payment)
+        write_to_bronze_orders([order])
+        write_to_bronze_payments([payment])
+        write_to_bronze_clickstream([event])
  
-    # Generate and write 1 clickstream event
-    # Reads from pools directly - independent of orders
-    event = generate_event(customer_pool, product_pool)
-    write_to_bronze_clickstream(event)
+        run_count += 1
+        print(f"Run {run_count} complete — sleeping {SLEEP_SECONDS}s")
+        time.sleep(SLEEP_SECONDS)
 
 # COMMAND ----------
 

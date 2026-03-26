@@ -2,6 +2,9 @@ resources:
   jobs:
     streamline_payments_pipeline:
       name: streamline_payments_pipeline
+      email_notifications:
+        on_failure:
+          - dilip.dot.dot@gmail.com
       tasks:
         - task_key: silver_payments
           notebook_task:
