@@ -15,7 +15,6 @@ from resources.notebooks.utils.config import get_config
 from resources.notebooks.utils.delta_helpers import (
     write_data,
     table_exists,
-    enable_cdf,
     get_table_location,
     column_exists
 )
@@ -27,6 +26,7 @@ from resources.notebooks.utils.schema_def import (
 )
  
 from faker import Faker
+from kafka import KafkaProducer
 import random
 import uuid
 from datetime import datetime, timedelta
@@ -45,6 +45,20 @@ fake = Faker('en_IN')
 
 dbutils.widgets.text("sleep_seconds", "1")
 SLEEP_SECONDS = int(dbutils.widgets.get("sleep_seconds"))
+
+# COMMAND ----------
+
+# ─────────────────────────────────
+# KAFKA CONFIG
+# ─────────────────────────────────
+# Fill these before running on Sunday!
+KAFKA_BOOTSTRAP_SERVERS = ""  # pkc-xxxxx.eastus.azure.confluent.cloud:9092
+KAFKA_API_KEY           = ""  # Confluent API Key
+KAFKA_API_SECRET        = ""  # Confluent API Secret
+ 
+KAFKA_TOPIC_ORDERS      = "orders"
+KAFKA_TOPIC_PAYMENTS    = "payments"
+KAFKA_TOPIC_CLICKSTREAM = "clickstream"
 
 # COMMAND ----------
 
@@ -70,6 +84,32 @@ DEVICES = ["mobile", "desktop", "tablet", "unknown"]
 # appear across multiple orders!
 CUSTOMER_POOL_SIZE = 400
 PRODUCT_POOL_SIZE = 150
+
+# COMMAND ----------
+
+# ─────────────────────────────────
+# KAFKA PRODUCER
+# ─────────────────────────────────
+ 
+def get_kafka_producer():
+    """
+    Create and return a Kafka producer.
+    Uses SASL_SSL for Confluent Cloud auth.
+    JSON serializer — Schema Registry in future.
+ 
+    Returns:
+        KafkaProducer instance
+    """
+    return KafkaProducer(
+        bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
+        security_protocol="SASL_SSL",
+        sasl_mechanism="PLAIN",
+        sasl_plain_username=KAFKA_API_KEY,
+        sasl_plain_password=KAFKA_API_SECRET,
+        value_serializer=lambda v: json.dumps(v, default=str).encode("utf-8"),
+        acks="all",
+        retries=3
+    )
 
 # COMMAND ----------
 
@@ -293,36 +333,21 @@ def inject_bad_order(order, bad_type, product_pool):
 # COMMAND ----------
 
 # ─────────────────────────────────
-# WRITE TO ORDERS BRONZE
+# PRODUCE TO KAFKA — ORDERS
 # ─────────────────────────────────
-def write_to_bronze_orders(orders: list):
+ 
+def produce_order(producer, order: dict):
     """
-    Convert orders list to DataFrame and
-    write to bronze.orders table.
-    Adds ingested_at audit column.
-    Enables CDF if not already enabled.
+    Produce one order record to Kafka orders topic.
+    Uses order_id as message key for partitioning.
+    Timestamps serialized to string via json default=str.
     """
-
-    df = spark.createDataFrame(orders, schema=order_schema)
-
-    # Add ingested_at
-    df = df.withColumn("ingested_at", current_timestamp())
-
-    write_data(
-        spark=spark,
-        df=df,
-        file_type="delta",
-        table_name=config["bronze_orders"],
-        location=get_table_location(
-            config["bronze_path"],
-            config["bronze_orders"]
-        )
+    producer.send(
+        KAFKA_TOPIC_ORDERS,
+        key=str(order["order_id"]).encode("utf-8"),
+        value=order
     )
-
-    # Enable CDF only if not already enabled
-    enable_cdf(spark, config["bronze_orders"])
-
-    print(f"Order written to {config['bronze_orders']} | order_id: {orders[0]['order_id']}")
+    print(f"Order produced to {KAFKA_TOPIC_ORDERS} | order_id: {order['order_id']}")
 
 # COMMAND ----------
 
@@ -412,31 +437,20 @@ def inject_bad_payment(payment, bad_type):
 # COMMAND ----------
 
 # ─────────────────────────────────
-# WRITE TO PAYMENTS BRONZE
+# PRODUCE TO KAFKA — PAYMENTS
 # ─────────────────────────────────
-
-def write_to_bronze_payments(payments: list):
-    """Write payments to bronze.payments table."""
-
-    df = spark.createDataFrame(payments, schema=payment_schema)
-    df = df.withColumn("ingested_at", current_timestamp())
-
-    write_data(
-        spark=spark,
-        df=df,
-        file_type="delta",
-        table_name=config["bronze_payments"],
-        location=get_table_location(
-            config["bronze_path"],
-            config["bronze_payments"]
-        )
+ 
+def produce_payment(producer, payment: dict):
+    """
+    Produce one payment record to Kafka payments topic.
+    Uses payment_id as message key for partitioning.
+    """
+    producer.send(
+        KAFKA_TOPIC_PAYMENTS,
+        key=str(payment["payment_id"]).encode("utf-8"),
+        value=payment
     )
-
-    # Enable CDF only if not already enabled
-    enable_cdf(spark, config["bronze_payments"])
-
-    print(f"Payment written to {config['bronze_payments']} | payment_id: {payments[0]['payment_id']}")
-
+    print(f"Payment produced to {KAFKA_TOPIC_PAYMENTS} | payment_id: {payment['payment_id']}")
 
 # COMMAND ----------
 
@@ -520,30 +534,20 @@ def inject_bad_event(event, bad_type):
 # COMMAND ----------
 
 # ─────────────────────────────────
-# WRITE TO CLICKSTREAM BRONZE
+# PRODUCE TO KAFKA — CLICKSTREAM
 # ─────────────────────────────────
-
-def write_to_bronze_clickstream(events: list):
-    """Write clickstream events to bronze.clickstream table."""
-
-    df = spark.createDataFrame(events, schema=clickstream_schema)
-    df = df.withColumn("ingested_at", current_timestamp())
-
-    write_data(
-        spark=spark,
-        df=df,
-        file_type="delta",
-        table_name=config["bronze_clickstream"],
-        location=get_table_location(
-            config["bronze_path"],
-            config["bronze_clickstream"]
-        )
+ 
+def produce_event(producer, event: dict):
+    """
+    Produce one clickstream event to Kafka clickstream topic.
+    Uses event_id as message key for partitioning.
+    """
+    producer.send(
+        KAFKA_TOPIC_CLICKSTREAM,
+        key=str(event["event_id"]).encode("utf-8"),
+        value=event
     )
-
-    # Enable CDF only if not already enabled
-    enable_cdf(spark, config["bronze_clickstream"])
-
-    print(f"Event written to {config['bronze_clickstream']} | event_id: {events[0]['event_id']}")
+    print(f"Event produced to {KAFKA_TOPIC_CLICKSTREAM} | event_id: {event['event_id']}")
 
 # COMMAND ----------
 
@@ -556,17 +560,20 @@ def run_pipeline():
     Main pipeline function.
     Runs continuously until job is manually stopped.
     Pools loaded once at start - not every iteration!
-    No optimize - vacuum job handles maintenance.
+    Producer created once - reused across all iterations.
+    Producer closed cleanly on job stop via finally block.
  
     Flow:
     1. Load customer and product pools (once)
-    2. Loop forever every SLEEP_SECONDS:
+    2. Create Kafka producer (once)
+    3. Loop forever every SLEEP_SECONDS:
        a. Generate 1 order
        b. Generate 1 payment linked to same order dict
           (referential integrity without bronze read)
        c. Generate 1 clickstream event from pools
-       d. Write all 3 to bronze
-       e. Sleep SLEEP_SECONDS
+       d. Produce all 3 to Kafka topics
+       e. Flush producer to ensure delivery
+       f. Sleep SLEEP_SECONDS
  
     Widget:
         sleep_seconds: Seconds to sleep between runs
@@ -575,20 +582,32 @@ def run_pipeline():
     """
     customer_pool = get_or_create_customer_pool()
     product_pool  = get_or_create_product_pool()
+    producer      = get_kafka_producer()
  
     run_count = 0
-    while True:
-        order   = generate_order(customer_pool, product_pool)
-        payment = generate_payment(order)
-        event   = generate_event(customer_pool, product_pool)
+    try:
+        while True:
+            order   = generate_order(customer_pool, product_pool)
+            payment = generate_payment(order)
+            event   = generate_event(customer_pool, product_pool)
  
-        write_to_bronze_orders([order])
-        write_to_bronze_payments([payment])
-        write_to_bronze_clickstream([event])
+            produce_order(producer, order)
+            produce_payment(producer, payment)
+            produce_event(producer, event)
  
-        run_count += 1
-        print(f"Run {run_count} complete — sleeping {SLEEP_SECONDS}s")
-        time.sleep(SLEEP_SECONDS)
+            # Flush ensures all messages delivered
+            # before sleeping
+            producer.flush()
+ 
+            run_count += 1
+            print(f"Run {run_count} complete — sleeping {SLEEP_SECONDS}s")
+            time.sleep(SLEEP_SECONDS)
+ 
+    finally:
+        # Always close producer cleanly
+        # even if job is manually stopped
+        producer.close()
+        print("Kafka producer closed")
 
 # COMMAND ----------
 

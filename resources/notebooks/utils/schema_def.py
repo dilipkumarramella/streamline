@@ -54,3 +54,10 @@ clickstream_schema = StructType([
     StructField("event_timestamp",TimestampType(),True),
     StructField("device",StringType(),True)
 ])
+# Bronze Dead Letter Schema
+dead_letter_schema = StructType([
+    StructField("raw_message", StringType(), True),
+    StructField("error", StringType(), True),
+    StructField("topic", StringType(), True),
+    StructField("ingested_at", TimestampType(), True)
+])

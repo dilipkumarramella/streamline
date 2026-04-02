@@ -21,6 +21,7 @@ def get_config(env: str) -> dict:
             "bronze_orders": "streamline.bronze.orders",
             "bronze_payments": "streamline.bronze.payments",
             "bronze_clickstream": "streamline.bronze.clickstream",
+            "bronze_dead_letter": "streamline.bronze.dead_letter",
             
             # Silver Tables
             "silver_fact_orders": "streamline.silver.fact_orders",
@@ -66,6 +67,7 @@ def get_config(env: str) -> dict:
             "bronze_orders": "streamline.bronze.orders",
             "bronze_payments": "streamline.bronze.payments",
             "bronze_clickstream": "streamline.bronze.clickstream",
+            "bronze_dead_letter": "streamline.bronze.dead_letter",
             
             # Silver Tables
             "silver_fact_orders": "streamline.silver.fact_orders",
