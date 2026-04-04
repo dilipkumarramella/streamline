@@ -184,7 +184,7 @@ Cleaned, typed, quality-gated data. Bad records quarantined with `rejection_reas
 ### 4.1 silver.fact_orders
 
 **Source:** `streamline.bronze.orders` via CDF  
-**Read by:** `streamline.gold.orders_daily_summary`, `streamline.gold.customer_360`, `streamline.gold.funnel_metrics`, `streamline.gold.data_quality_metrics`  
+**Read by:** `streamline.gold.orders_daily_summary`, `streamline.gold.customer_360` 
 Grain: one row per order-item (exploded from items array).  
 Merge key: `order_id + product_id`
 
@@ -204,7 +204,7 @@ Merge key: `order_id + product_id`
 ### 4.2 silver.fact_payments
 
 **Source:** `streamline.bronze.payments` via CDF  
-**Read by:** `streamline.gold.payment_success_rate`, `streamline.gold.data_quality_metrics`  
+**Read by:** `streamline.gold.payment_success_rate`
 Grain: one row per payment attempt.  
 Merge key: `payment_id`
 
@@ -227,7 +227,7 @@ Merge key: `payment_id`
 ### 4.3 silver.fact_events
 
 **Source:** `streamline.bronze.clickstream` via CDF  
-**Read by:** `streamline.gold.funnel_metrics`, `streamline.gold.data_quality_metrics`  
+**Read by:** `streamline.gold.funnel_metrics`
 Grain: one row per clickstream event.  
 Merge key: `event_id`
 
@@ -414,7 +414,7 @@ Grain: one row per payment_date + payment_method.
 
 #### gold.data_quality_metrics
 
-**Source:** `streamline.silver.pipeline_state`, `streamline.silver.orders_quarantine`, `streamline.silver.payments_quarantine`  
+**Source:** `streamline.silver.pipeline_state`  
 **Read by:** PowerBI dashboard  
 Grain: one row per pipeline_date + pipeline_name.
 
