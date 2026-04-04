@@ -34,6 +34,7 @@ resources:
         enabled: true
       parameters:
         - name: topic
+          default: ""
         - name: env
           default: ${var.env}
       run_as:
