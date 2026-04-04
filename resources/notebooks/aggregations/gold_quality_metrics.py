@@ -34,8 +34,8 @@ from pyspark.sql.functions import (
 # ─────────────────────────────────
 # CONFIGS
 # ─────────────────────────────────
-# env = dbutils.widgets.get("env")
-config = get_config(env="dev")
+env = dbutils.widgets.get("env")
+config = get_config(env=env)
  
 PIPELINE_NAME = "silver_to_gold_data_quality"
  

@@ -47,8 +47,8 @@ from pyspark.sql.functions import (
 # ─────────────────────────────────
 # CONFIGS
 # ─────────────────────────────────
-# env = dbutils.widgets.get("env")
-config = get_config(env="dev")
+env = dbutils.widgets.get("env")
+config = get_config(env=env)
 
 # Backfill / Reprocessing parameters
 dbutils.widgets.text("start_datetime", "")

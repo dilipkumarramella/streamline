@@ -29,9 +29,10 @@ The project is designed to reflect decisions a data engineer would make at a pro
 - Real-time ingestion from Kafka into Bronze Delta tables (Single Source of Truth)
 - Incremental Silver processing with CDF, data quality gates, and quarantine pattern
 - Two Gold paths: CDF-incremental batch aggregations for reporting, DLT streaming for operational analytics
-- Dead Letter Queue for unparseable Kafka messages
+- Dead Letter Queue for unparseable Kafka messages with adhoc reprocessing
+- Quarantine reprocessing pipeline — rerun bad records through full quality checks
 - Full CI/CD with GitHub Actions and Databricks Asset Bundles
-- Column-level lineage via Unity Catalog
+- Table-level lineage via Unity Catalog
 - Job failure alerting
 
 ---
@@ -62,11 +63,11 @@ The project is designed to reflect decisions a data engineer would make at a pro
 ┌─────────────────────────┐           ┌──────────────────────────────┐
 │     SILVER LAYER        │           │       GOLD REALTIME          │
 │                         │           │                              │
-│  fact_orders            │           │  gold_dlt_realtime           │
-│  fact_payments          │           │  (DLT Streaming Pipeline)    │
-│  fact_events            │           │                              │
-│  dim_customer (SCD2)    │           └──────────────────────────────┘
-│  dim_product  (SCD2)    │
+│  fact_orders            │           │  live_order_summary          │
+│  fact_payments          │           │  live_funnel_snapshot        │
+│  fact_events            │           │  live_payment_success_rate   │
+│  dim_customer (SCD2)    │           │  (DLT Streaming Pipeline)    │
+│  dim_product  (SCD2)    │           └──────────────────────────────┘
 │  orders_quarantine      │
 │  payments_quarantine    │
 │  pipeline_state         │
@@ -93,10 +94,10 @@ The project is designed to reflect decisions a data engineer would make at a pro
 
 ### 3.1 Ingestion (Bronze)
 
-`bronze_delta.py` reads from all three Kafka topics using PySpark Structured Streaming with schema enforcement. Records land in Bronze Delta tables with an `ingested_at` audit timestamp. Messages that are completely unparseable are routed to `bronze.dead_letter` instead of crashing the stream — separating bad messages (DLQ) from bad values (quarantine).
+`data_generator.py` produces synthetic e-commerce events to three Confluent Kafka topics. `bronze_delta.py` reads from all three topics using PySpark Structured Streaming with schema enforcement. Records land in Bronze Delta tables with an `ingested_at` audit timestamp. Messages that are completely unparseable are routed to `bronze.dead_letter` instead of crashing the stream — separating bad messages (DLQ) from bad values (quarantine).
 
-**Why Bronze is the Single Source of Truth:**  
-Raw data is never modified or deleted from Bronze. Every downstream pipeline reads from Bronze, not from Kafka directly. Any Silver or Gold pipeline can be fully reprocessed at any time without re-consuming Kafka — critical for backfill and schema change recovery.
+**Why Bronze is the Single Source of Truth:**
+Raw data is never modified or deleted from Bronze. Every downstream pipeline reads from Bronze, not from Kafka directly. Any Silver or Gold pipeline can be fully reprocessed at any time without re-consuming Kafka.
 
 ### 3.2 Silver Processing (Incremental Batch)
 
@@ -113,8 +114,7 @@ Backfill/Reprocess  → datetime range filter on ingested_at
 No new data         → early exit, no processing
 ```
 
-**Why CDF over Autoloader:**  
-Autoloader is optimised for file-based sources. Since our source is Kafka → Delta, CDF is the correct mechanism — it reads at the Delta transaction level, capturing every change exactly once regardless of timestamp ordering.
+**Why CDF over Autoloader:** Autoloader is optimised for file-based sources. Since our source is Kafka → Delta, CDF is the correct mechanism — transaction-level reads, exact-once capture regardless of timestamp ordering.
 
 ### 3.4 Gold — Batch vs Streaming
 
@@ -123,13 +123,19 @@ Autoloader is optimised for file-based sources. Since our source is Kafka → De
 | Batch | CDF-incremental aggregations | Daily 2AM | PowerBI | Historical analysis, reporting |
 | Streaming | DLT Continuous, 10-min watermark | 24/7 | Operational dashboards | Real-time metrics |
 
-Batch Gold runs after all Silver is settled and produces complete daily summaries. DLT Streaming Gold trades completeness for latency, using a 10-minute watermark to handle late-arriving events without holding state indefinitely. Mixing both in one table would require watermarking trade-offs that compromise both SLAs.
+Batch Gold runs after all Silver is settled and produces complete daily summaries. DLT Streaming Gold trades completeness for latency, using a 10-minute watermark to handle late-arriving events. Mixing both in one table would require watermarking trade-offs that compromise both SLAs.
 
 ### 3.5 Gold Incremental Strategy
 
-Gold batch pipelines do not full-scan Silver on every run. Each uses CDF to identify only the Silver rows that changed since the last run, then recomputes only the affected aggregates. For example, `gold.customer_360` reads changed `fact_orders` rows, extracts the affected `customer_id`s, recomputes RFM only for those customers, and merges the results — leaving all other customers in Gold unchanged. Column pruning ensures only the columns needed for each aggregation are read from Silver.
+Gold batch pipelines do not full-scan Silver on every run. Each uses CDF to identify only the Silver rows that changed since the last run, then recomputes only the affected aggregates. For example, `gold.customer_360` reads changed `fact_orders` rows, extracts affected `customer_id`s, recomputes RFM only for those customers, and merges the results. Column pruning ensures only required columns are read from Silver.
 
-This makes Gold pipelines O(changed data) instead of O(total data) — the same CDF principle applied one layer further down.
+### 3.6 DLQ Reprocessing
+
+`reprocess_dlq.py` is an adhoc maintenance notebook. Given a topic name, it reads `bronze.dead_letter` for that topic, attempts re-parsing with the correct schema, and writes successfully parsed records to the appropriate bronze table via merge. Run from the Jobs UI when upstream message format issues are fixed.
+
+### 3.7 Quarantine Reprocessing
+
+`reprocess_quarantine.py` accepts a `source` parameter (`orders` or `payments`). It reads the quarantine table, runs the same full quality check pipeline as the Silver notebook, writes records that now pass to Silver via merge, and writes still-failing records back to quarantine with updated `rejection_reason`. Idempotent — safe to rerun.
 
 ---
 
@@ -146,7 +152,7 @@ This makes Gold pipelines O(changed data) instead of O(total data) — the same 
 
 **Why ADLS Gen2:** Hierarchical namespace enables atomic directory operations, fine-grained ACLs, and significantly better Delta Lake file listing performance compared to Blob Storage.
 
-**Why Databricks Premium:** Unity Catalog requires Premium. UC provides three-level namespace (`catalog.schema.table`), column-level lineage, fine-grained access control, and cross-workspace data sharing.
+**Why Databricks Premium:** Unity Catalog requires Premium. UC provides three-level namespace (`catalog.schema.table`), table-level lineage, fine-grained access control, and cross-workspace data sharing.
 
 ### 4.2 Databricks Setup
 
@@ -157,9 +163,7 @@ This makes Gold pipelines O(changed data) instead of O(total data) — the same 
 | Photon | OFF | Not needed for current workload size |
 | Auto-terminate | 30 mins (interactive) | Credit conservation |
 | Job clusters | Separate per job | Cheaper per DBU, auto-terminate on completion |
-| Column lineage | Enabled | End-to-end lineage in Unity Catalog Data Explorer |
-
-Job clusters for streaming mean the cluster terminates automatically when a job fails or is stopped — no idle credit burn and no resource competition with interactive development.
+| Table lineage | Enabled | Unity Catalog table-level lineage tracking |
 
 ### 4.3 Unity Catalog Structure
 
@@ -172,7 +176,16 @@ streamline (catalog)
 
 **Why external tables:** Data lives in ADLS at a controlled path. If the workspace or catalog metadata is lost, data is not lost — it can be re-registered. Managed tables tie data lifecycle to the catalog, which is a risk in a multi-workspace setup.
 
-### 4.4 Alerting
+### 4.4 Confluent Kafka Setup
+
+| Component | Config | Reason |
+|---|---|---|
+| Cluster | Basic/Standard | Cost optimisation |
+| Region | asia-south1 | Select the region closer to your databricks workspace region |
+| Provider | Azure/GCP | Any cloud as per your choice |
+| Topics | 3 (orders, payments, clickstream) | Three topics for three tables |
+
+### 4.5 Alerting
 
 Databricks job failure alerts are configured per job. `pipeline_state` records `status = failed` for every pipeline failure, queryable by the orchestrator to block dependent Gold jobs from running on stale Silver data.
 
@@ -206,7 +219,7 @@ Databricks job failure alerts are configured per job. `pipeline_state` records `
 
 **Why not SCD2 for facts:** Facts are immutable business events. An order placed in Mumbai was placed in Mumbai. SCD2 on facts would be meaningless.
 
-**run_number for change detection:** The data generator injects `run_number + 1` into records representing attribute changes. Silver SCD2 pipelines detect changes by comparing incoming `run_number` against the current dimension row — lightweight and avoids expensive full-row hash comparisons.
+**run_number for change detection:** The data generator injects `run_number + 1` into records representing attribute changes. Silver SCD2 pipelines detect changes by comparing incoming `run_number` against the current dimension row — lightweight, avoids full-row hash comparisons.
 
 ---
 
@@ -216,7 +229,7 @@ Databricks job failure alerts are configured per job. `pipeline_state` records `
 
 **Why:** Silently dropping bad records makes data quality invisible and irrecoverable. Quarantine tables make bad data visible, queryable, and reprocessable once the upstream issue is fixed. `gold.data_quality_metrics` aggregates quarantine counts daily so quality trends are trackable over time.
 
-**Why no quarantine for clickstream:** Clickstream is client-side behavioural data. Even if a record is quarantined, there is no source to recover the original event from — it exists only in the client's session. Quarantining creates a false impression of recoverability.
+**Why no quarantine for clickstream:** Clickstream is client-side behavioural data. Even if a record is quarantined, there is no source to recover the original event from. Quarantining creates a false impression of recoverability.
 
 ---
 
@@ -224,7 +237,7 @@ Databricks job failure alerts are configured per job. `pipeline_state` records `
 
 **Decision:** Completely unparseable Kafka messages are written to `bronze.dead_letter` instead of crashing the stream.
 
-**Why:** The quarantine pattern handles bad *values*. A message that cannot be parsed into a DataFrame row at all — corrupt JSON, wrong message format — would crash the stream without a DLQ. The DLQ separates two distinct failure modes: bad data (quarantine) vs bad messages (DLQ). Both are observable and recoverable without stream downtime.
+**Why:** The quarantine pattern handles bad *values*. A message that cannot be parsed into a DataFrame row at all would crash the stream without a DLQ. The DLQ separates two distinct failure modes: bad data (quarantine) vs bad messages (DLQ). Both are observable, recoverable, and reprocessable via `reprocess_dlq.py`.
 
 ---
 
@@ -232,7 +245,7 @@ Databricks job failure alerts are configured per job. `pipeline_state` records `
 
 **Decision:** Last successfully processed Bronze version tracked per pipeline in a `pipeline_state` Delta table.
 
-**Why version numbers over timestamps:** Version numbers are monotonically increasing and unambiguous. Timestamps can have clock skew. Version 47 always follows version 46 — there is no ambiguity.
+**Why version numbers over timestamps:** Version numbers are monotonically increasing and unambiguous. Timestamps can have clock skew. Version 47 always follows version 46.
 
 **Why per-pipeline state:** Each Silver pipeline is independent. `silver_orders` and `silver_payments` may be at different Bronze versions if one failed. Per-pipeline state allows independent recovery without affecting other pipelines.
 
@@ -267,6 +280,23 @@ Databricks job failure alerts are configured per job. `pipeline_state` records `
 **Decision:** Every Silver pipeline exposes `start_datetime` and `end_datetime` as Databricks job widgets.
 
 **Why:** Backfill is an operational reality. Datetime widgets let operators trigger backfill from the Jobs UI without modifying code. `merge_to_delta` ensures reprocessed records are idempotent — no duplicates regardless of how many times a range is reprocessed.
+
+---
+
+### 5.11 Service Level Objectives
+
+| Pipeline | Freshness SLA | Completeness SLA | Recovery Time |
+|----------|---------------|------------------|---------------|
+| **Bronze Streaming** | <5min end-to-end | 99.9% (DLQ catches rest) | <15min |
+| **Silver Batch** | Daily 2AM | 100% (quarantine → manual) | <2hrs |
+| **Gold Batch** | Daily 6AM | 100% | <1hr |
+| **Gold DLT** | <15min (10min watermark) | 99% (late data tolerance) | <30min |
+
+**SLA Rationale:**
+- **Bronze**: Kafka → Delta must be near-real-time for operational use cases
+- **Silver**: Daily batch allows full quality gates + quarantine reprocessing 
+- **Gold Batch**: Reporting needs complete daily data, runs after Silver settles
+- **Gold DLT**: Trades completeness for latency using watermarking
 
 ---
 
@@ -312,30 +342,30 @@ All Databricks resources are defined as code in YAML — jobs, DLT pipelines, sc
 streamline/
 ├── .github/
 │   └── workflows/
-│       ├── ci.yml              ← validate + unit tests on PR
-│       └── cd.yml              ← deploy on push to develop/main
-├── databricks.yml
+│       ├── ci.yml                      ← validate + unit tests on PR
+│       └── cd.yml                      ← deploy on push to develop/main
+├── databricks.yml                      ← root config, targets, state paths
 ├── src/
-│   ├── variables.yml
+│   ├── variables.yml                   ← shared variables
 │   └── env/
-│       ├── dev.yml
-│       └── prod.yml
+│       ├── dev.yml                     ← dev overrides, permissions, name_prefix
+│       └── prod.yml                    ← prod overrides, permissions
 ├── resources/
 │   ├── notebooks/
 │   │   ├── utils/
-│   │   │   ├── config.py           ← environment config
-│   │   │   ├── schema_def.py       ← Bronze StructType schemas
-│   │   │   ├── delta_helpers.py    ← all Delta read/write/merge ops
-│   │   │   └── data_quality.py     ← all quality check functions
+│   │   │   ├── config.py               ← environment config + Kafka credentials
+│   │   │   ├── schema_def.py           ← Bronze StructType schemas
+│   │   │   ├── delta_helpers.py        ← all Delta read/write/merge/CDF ops
+│   │   │   └── data_quality.py         ← all quality check functions
 │   │   ├── ingestion/
-│   │   │   ├── data_generator.py   ← synthetic data (continuous)
-│   │   │   └── bronze_delta.py     ← Kafka → Bronze streaming + DLQ
+│   │   │   ├── data_generator.py       ← synthetic data → Kafka producer
+│   │   │   └── bronze_delta.py         ← Kafka → Bronze streaming + DLQ
 │   │   ├── transformations/
 │   │   │   ├── silver_orders.py
 │   │   │   ├── silver_payments.py
 │   │   │   ├── silver_clickstream.py
-│   │   │   ├── silver_customers.py
-│   │   │   └── silver_products.py
+│   │   │   ├── silver_customers_dim.py
+│   │   │   └── silver_products_dim.py
 │   │   ├── gold/
 │   │   │   ├── gold_orders_daily.py
 │   │   │   ├── gold_customer_360.py
@@ -345,10 +375,24 @@ streamline/
 │   │   ├── dlt/
 │   │   │   └── gold_dlt_realtime.py
 │   │   └── maintenance/
-│   │       └── optimize_vacuum.py
+│   │       ├── vacuum.py               ← VACUUM all tables, 7-day retention
+│   │       ├── reprocess_dlq.py        ← adhoc DLQ reprocessing by topic
+│   │       └── reprocess_quarantine.py ← adhoc quarantine reprocessing
 │   ├── jobs/
+│   │   ├── data_generator_and_bronze_continuous.yml
+│   │   ├── reprocess_dlq.yml
+│   │   ├── reprocess_quarantine.yml
+│   │   ├── streamline_batch_orchestrator_job.yml
+│   │   ├── streamline_clickstream_pipeline.yml
+│   │   ├── streamline_customers_pipeline.yml
+│   │   ├── streamline_orders_silver.yml
+│   │   ├── streamline_payments_pipeline.yml
+│   │   ├── streamline_products_pipeline.yml
+│   │   └── vacuum_all_tables.yml
 │   ├── pipelines/
+│   │   └── streamline_dlt_pipeline.yml
 │   └── schemas/
+│       └── streamline_schemas.yml
 └── tests/
     └── test_data_quality.py
 ```
@@ -357,13 +401,19 @@ streamline/
 
 ## 9. Known Limitations
 
-**DAB schema name prefix bug:**  
+**DAB schema name prefix bug:**
 The `name_prefix` preset in `dev.yml` applies to schema names despite documentation stating otherwise. This is an open Databricks bug — `skip_name_prefix_for_schema` is preview only. Dev schemas are created with a user prefix but pipelines target unprefixed schemas via `config.py`. No impact on prod where `name_prefix` is not used.
 
-**Single-node cluster:**  
+**Schema Registry not implemented:**
+Confluent Schema Registry is not integrated in this version. Schema enforcement is handled at the Bronze write step via `schema_def.py` StructType schemas. Schema Registry with Avro/Protobuf is planned as a future enhancement.
+
+**Continuous streaming limited by free trial quota:**
+Due to Azure free trial credit constraints, the continuous `data_generator_and_bronze_continuous` job and `streamline_dlt_pipeline` cannot be run 24/7 to demonstrate live streaming data in the Gold realtime tables. The streaming architecture is fully implemented and tested — the limitation is infrastructure cost, not code. Streaming Gold tables (`live_order_summary`, `live_funnel_snapshot`, `live_payment_success_rate`) are populated in short demo runs.
+
+**Single-node cluster:**
 Dev uses a single D4ds_v5 node for cost reasons. Production would use a multi-node auto-scaling cluster.
 
 ---
 
-*Last updated: March 2026*  
-*Author: Dilip*
+*Last updated: April 2026*  
+*Author: Dilip Kumar Ramella*
