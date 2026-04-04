@@ -1,16 +1,12 @@
 # Databricks notebook source
-# MAGIC %pip install faker
-
-# COMMAND ----------
-
 # ─────────────────────────────────
 # IMPORTS
 # ─────────────────────────────────
 import sys
+
 bundle_root = dbutils.widgets.get("bundle_root")
 sys.path.append(bundle_root)
 
- 
 from resources.notebooks.utils.config import get_config
 from resources.notebooks.utils.delta_helpers import (
     write_data,
@@ -31,6 +27,7 @@ import random
 import uuid
 from datetime import datetime, timedelta
 import time
+import json
  
 from pyspark.sql.functions import current_timestamp, col
 
@@ -39,26 +36,12 @@ from pyspark.sql.functions import current_timestamp, col
 # ─────────────────────────────────
 # CONFIGS
 # ─────────────────────────────────
-# env = dbutils.widgets.get("env")
-config = get_config(env="dev")
+env = dbutils.widgets.get("env")
+config = get_config(env=env)
 fake = Faker('en_IN')
 
-dbutils.widgets.text("sleep_seconds", "1")
+dbutils.widgets.text("sleep_seconds", "10")
 SLEEP_SECONDS = int(dbutils.widgets.get("sleep_seconds"))
-
-# COMMAND ----------
-
-# ─────────────────────────────────
-# KAFKA CONFIG
-# ─────────────────────────────────
-# Fill these before running on Sunday!
-KAFKA_BOOTSTRAP_SERVERS = ""  # pkc-xxxxx.eastus.azure.confluent.cloud:9092
-KAFKA_API_KEY           = ""  # Confluent API Key
-KAFKA_API_SECRET        = ""  # Confluent API Secret
- 
-KAFKA_TOPIC_ORDERS      = "orders"
-KAFKA_TOPIC_PAYMENTS    = "payments"
-KAFKA_TOPIC_CLICKSTREAM = "clickstream"
 
 # COMMAND ----------
 
@@ -67,8 +50,7 @@ KAFKA_TOPIC_CLICKSTREAM = "clickstream"
 # ─────────────────────────────────
 BAD_DATA_PERCENTAGE = round(random.uniform(0, 0.075), 3)
 
-# Unique run identifier
-# Increases every run!
+# Unique run identifier, increases every run
 RUN_NUMBER = int(time.time())
 
 ORDER_STATUSES = ["delivered", "pending", "cancelled", "returned"]
@@ -79,9 +61,7 @@ INVALID_ORDER_STATUSES = ["unknown", "processing", "invalid", "null"]
 EVENT_TYPES = ["view", "add_to_cart", "checkout", "purchase"]
 DEVICES = ["mobile", "desktop", "tablet", "unknown"]
 
-# Fixed pools for realistic data
-# Same customers and products
-# appear across multiple orders!
+# Fixed pools for realistic data, Same customers and products appear across multiple orders(Compliments SCD2)
 CUSTOMER_POOL_SIZE = 400
 PRODUCT_POOL_SIZE = 150
 
@@ -101,11 +81,11 @@ def get_kafka_producer():
         KafkaProducer instance
     """
     return KafkaProducer(
-        bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
+        bootstrap_servers=config["KAFKA_BOOTSTRAP_SERVERS"],
         security_protocol="SASL_SSL",
         sasl_mechanism="PLAIN",
-        sasl_plain_username=KAFKA_API_KEY,
-        sasl_plain_password=KAFKA_API_SECRET,
+        sasl_plain_username=config["KAFKA_API_KEY"],
+        sasl_plain_password=config["KAFKA_API_SECRET"],
         value_serializer=lambda v: json.dumps(v, default=str).encode("utf-8"),
         acks="all",
         retries=3
@@ -342,12 +322,16 @@ def produce_order(producer, order: dict):
     Uses order_id as message key for partitioning.
     Timestamps serialized to string via json default=str.
     """
-    producer.send(
-        KAFKA_TOPIC_ORDERS,
-        key=str(order["order_id"]).encode("utf-8"),
-        value=order
-    )
-    print(f"Order produced to {KAFKA_TOPIC_ORDERS} | order_id: {order['order_id']}")
+    try:
+        producer.send(
+            config["KAFKA_TOPIC_ORDERS"],
+            key=str(order["order_id"]).encode("utf-8"),
+            value=order
+        )
+        print(f"Order produced to {config["KAFKA_TOPIC_ORDERS"]} | order_id: {order['order_id']}")
+    
+    except Exception as e:
+        print(f"Kafka send failed for order_id {order['order_id']}: {e}")
 
 # COMMAND ----------
 
@@ -445,12 +429,16 @@ def produce_payment(producer, payment: dict):
     Produce one payment record to Kafka payments topic.
     Uses payment_id as message key for partitioning.
     """
-    producer.send(
-        KAFKA_TOPIC_PAYMENTS,
-        key=str(payment["payment_id"]).encode("utf-8"),
-        value=payment
-    )
-    print(f"Payment produced to {KAFKA_TOPIC_PAYMENTS} | payment_id: {payment['payment_id']}")
+    try:
+        producer.send(
+            config["KAFKA_TOPIC_PAYMENTS"],
+            key=str(payment["payment_id"]).encode("utf-8"),
+            value=payment
+        )
+        print(f"Payment produced to {config["KAFKA_TOPIC_PAYMENTS"]} | payment_id: {payment['payment_id']}")
+    
+    except Exception as e:
+        print(f"Kafka send failed for payment_id {payment['payment_id']}: {e}")
 
 # COMMAND ----------
 
@@ -542,12 +530,16 @@ def produce_event(producer, event: dict):
     Produce one clickstream event to Kafka clickstream topic.
     Uses event_id as message key for partitioning.
     """
-    producer.send(
-        KAFKA_TOPIC_CLICKSTREAM,
-        key=str(event["event_id"]).encode("utf-8"),
-        value=event
-    )
-    print(f"Event produced to {KAFKA_TOPIC_CLICKSTREAM} | event_id: {event['event_id']}")
+    try:
+        producer.send(
+            config["KAFKA_TOPIC_CLICKSTREAM"],
+            key=str(event["event_id"]).encode("utf-8"),
+            value=event
+        )
+        print(f"Event produced to {config["KAFKA_TOPIC_CLICKSTREAM"]} | event_id: {event['event_id']}")
+
+    except Exception as e:
+        print(f"Kafka send failed for event_id {event['order_id']}: {e}")
 
 # COMMAND ----------
 
@@ -596,7 +588,6 @@ def run_pipeline():
             produce_event(producer, event)
  
             # Flush ensures all messages delivered
-            # before sleeping
             producer.flush()
  
             run_count += 1
@@ -604,8 +595,7 @@ def run_pipeline():
             time.sleep(SLEEP_SECONDS)
  
     finally:
-        # Always close producer cleanly
-        # even if job is manually stopped
+        # Always closes producer cleanly even if job is manually stopped
         producer.close()
         print("Kafka producer closed")
 

@@ -3,6 +3,7 @@
 # IMPORTS
 # ─────────────────────────────────
 import sys
+
 bundle_root = dbutils.widgets.get("bundle_root")
 sys.path.append(bundle_root)
  
@@ -37,30 +38,21 @@ from pyspark.sql.types import (
 # ─────────────────────────────────
 # CONFIGS
 # ─────────────────────────────────
-# env = dbutils.widgets.get("env")
-config = get_config(env="dev")
+env = dbutils.widgets.get("env")
+config = get_config(env=env)
 
 # COMMAND ----------
 
 # ─────────────────────────────────
 # KAFKA CONFIG
 # ─────────────────────────────────
-
-KAFKA_BOOTSTRAP_SERVERS = ""  # pkc-xxxxx.eastus.azure.confluent.cloud:9092
-KAFKA_API_KEY           = ""  # Confluent API Key
-KAFKA_API_SECRET        = ""  # Confluent API Secret
- 
-KAFKA_TOPIC_ORDERS      = "orders"
-KAFKA_TOPIC_PAYMENTS    = "payments"
-KAFKA_TOPIC_CLICKSTREAM = "clickstream"
  
 # Shared Kafka options for all topics
-# Reused across all read_stream_data calls
 KAFKA_OPTIONS = {
-    "kafka.bootstrap.servers": KAFKA_BOOTSTRAP_SERVERS,
+    "kafka.bootstrap.servers": config["KAFKA_BOOTSTRAP_SERVERS"],
     "kafka.security.protocol": "SASL_SSL",
     "kafka.sasl.mechanism":    "PLAIN",
-    "kafka.sasl.jaas.config":  f'kafkashaded.org.apache.kafka.common.security.plain.PlainLoginModule required username="{KAFKA_API_KEY}" password="{KAFKA_API_SECRET}";',
+    "kafka.sasl.jaas.config":  f'kafkashaded.org.apache.kafka.common.security.plain.PlainLoginModule required username="{config["KAFKA_API_KEY"]}" password="{config["KAFKA_API_SECRET"]}";',
     "startingOffsets":         "latest",
     "failOnDataLoss":          "false"
 }
@@ -93,10 +85,8 @@ def parse_with_dlq(raw_df, schema, topic: str):
                good_df = successfully parsed + ingested_at added
                dlq_df  = unparseable records with error info
     """
-    # Cast binary to string
     string_df = raw_df.selectExpr("CAST(value AS STRING) AS raw_message")
  
-    # Attempt JSON parse
     parsed_df = string_df.withColumn(
         "parsed",
         from_json(col("raw_message"), schema)
@@ -139,20 +129,27 @@ def enable_bronze_cdf():
     enable_cdf() is idempotent — safe to
     call multiple times.
     """
-    import time
-    print("Waiting 60s for first micro-batch...")
-    time.sleep(60)
- 
     for table in [
         config["bronze_orders"],
         config["bronze_payments"],
         config["bronze_clickstream"],
         config["bronze_dead_letter"]
     ]:
+        
+        retries = 3
+        success = False
+
+    while retries > 0:
         if table_exists(spark, table):
             enable_cdf(spark, table)
-            print(f"CDF enabled on {table}")
+            success = True
+            break
         else:
+            print(f"{table} not found, retrying in 30s...")
+            time.sleep(30)
+            retries -= 1
+
+    if not success:
             print(f"Table not yet created: {table} — retry manually")
 
 # COMMAND ----------
@@ -183,17 +180,17 @@ def run_pipeline():
     """
     print("Starting bronze streaming pipeline...")
  
-    # ── Orders ──────────────────────────────
+    # Orders ──────────────────────────────
     raw_orders = read_stream_data(
         spark=spark,
         file_type="kafka",
-        options={**KAFKA_OPTIONS, "subscribe": KAFKA_TOPIC_ORDERS}
+        options={**KAFKA_OPTIONS, "subscribe": config["KAFKA_TOPIC_ORDERS"]}
     )
  
     good_orders, dlq_orders = parse_with_dlq(
         raw_df=raw_orders,
         schema=order_schema,
-        topic=KAFKA_TOPIC_ORDERS
+        topic=config["KAFKA_TOPIC_ORDERS"]
     )
  
     write_stream_data(
@@ -210,17 +207,17 @@ def run_pipeline():
         table_name=config["bronze_dead_letter"]
     )
  
-    # ── Payments ────────────────────────────
+    # Payments ────────────────────────────
     raw_payments = read_stream_data(
         spark=spark,
         file_type="kafka",
-        options={**KAFKA_OPTIONS, "subscribe": KAFKA_TOPIC_PAYMENTS}
+        options={**KAFKA_OPTIONS, "subscribe": config["KAFKA_TOPIC_PAYMENTS"]}
     )
  
     good_payments, dlq_payments = parse_with_dlq(
         raw_df=raw_payments,
         schema=payment_schema,
-        topic=KAFKA_TOPIC_PAYMENTS
+        topic=config["KAFKA_TOPIC_PAYMENTS"]
     )
  
     write_stream_data(
@@ -237,17 +234,17 @@ def run_pipeline():
         table_name=config["bronze_dead_letter"]
     )
  
-    # ── Clickstream ─────────────────────────
+    # Clickstream ─────────────────────────
     raw_clickstream = read_stream_data(
         spark=spark,
         file_type="kafka",
-        options={**KAFKA_OPTIONS, "subscribe": KAFKA_TOPIC_CLICKSTREAM}
+        options={**KAFKA_OPTIONS, "subscribe": config["KAFKA_TOPIC_CLICKSTREAM"]}
     )
  
     good_clickstream, dlq_clickstream = parse_with_dlq(
         raw_df=raw_clickstream,
         schema=clickstream_schema,
-        topic=KAFKA_TOPIC_CLICKSTREAM
+        topic=config["KAFKA_TOPIC_CLICKSTREAM"]
     )
  
     write_stream_data(
@@ -268,9 +265,6 @@ def run_pipeline():
  
     # Enable CDF after first micro-batch
     enable_bronze_cdf()
- 
-    # Keep notebook running until job is stopped
-    spark.streams.awaitAnyTermination()
 
 # COMMAND ----------
 

@@ -44,7 +44,15 @@ def get_config(env: str) -> dict:
 
             # Pool tables
             "customer_pool": "streamline.bronze.customer_pool",
-            "product_pool": "streamline.bronze.product_pool"
+            "product_pool": "streamline.bronze.product_pool",
+
+            # Kafka config
+            "KAFKA_BOOTSTRAP_SERVERS": "pkc-41p56.asia-south1.gcp.confluent.cloud:9092",
+            "KAFKA_API_KEY": "MG7IHRPFZWE3KAV4",
+            "KAFKA_API_SECRET": "cfltHZgMnMXr/zPSd2wPrf/TFOvD5uElcb9kvN4U1iaHzS9btibgfGCov8MTPsDw",
+            "KAFKA_TOPIC_ORDERS": "orders",
+            "KAFKA_TOPIC_CLICKSTREAM": "clickstream",
+            "KAFKA_TOPIC_PAYMENTS": "payments"
         },
         
         "prod": {
@@ -90,7 +98,15 @@ def get_config(env: str) -> dict:
 
             # Pool tables
             "customer_pool": "streamline.bronze.customer_pool",
-            "product_pool": "streamline.bronze.product_pool"
+            "product_pool": "streamline.bronze.product_pool",
+
+            # Kafka config
+            "KAFKA_BOOTSTRAP_SERVERS": "pkc-41p56.asia-south1.gcp.confluent.cloud:9092",
+            "KAFKA_API_KEY": "MG7IHRPFZWE3KAV4",
+            "KAFKA_API_SECRET": "cfltHZgMnMXr/zPSd2wPrf/TFOvD5uElcb9kvN4U1iaHzS9btibgfGCov8MTPsDw",
+            "KAFKA_TOPIC_ORDERS": "orders",
+            "KAFKA_TOPIC_CLICKSTREAM": "clickstream",
+            "KAFKA_TOPIC_PAYMENTS": "payments"
         }
     }
     
