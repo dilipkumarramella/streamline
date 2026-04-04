@@ -9,10 +9,10 @@
 
 1. [Overview](#1-overview)
 2. [Table Creation Pattern](#2-Table-Creation-Pattern)
-3. [Bronze Layer](#2-bronze-layer)
-4. [Silver Layer](#3-silver-layer)
-5. [Gold Layer](#4-gold-layer)
-6. [Supporting Tables](#5-supporting-tables)
+3. [Bronze Layer](#3-bronze-layer)
+4. [Silver Layer](#4-silver-layer)
+5. [Gold Layer](#5-gold-layer)
+6. [Supporting Tables](#6-supporting-tables)
 
 ---
 
