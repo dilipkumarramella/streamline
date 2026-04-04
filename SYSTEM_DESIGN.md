@@ -379,7 +379,7 @@ streamline/
 │   │       ├── reprocess_dlq.py        ← adhoc DLQ reprocessing by topic
 │   │       └── reprocess_quarantine.py ← adhoc quarantine reprocessing
 │   ├── jobs/
-│   │   ├── data_generator_and_bronze_continous.yml
+│   │   ├── data_generator_and_bronze_continuous.yml
 │   │   ├── reprocess_dlq.yml
 │   │   ├── reprocess_quarantine.yml
 │   │   ├── streamline_batch_orchestrator_job.yml
