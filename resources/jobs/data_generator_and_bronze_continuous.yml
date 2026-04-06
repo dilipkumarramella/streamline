@@ -48,5 +48,7 @@ resources:
       parameters:
         - name: env
           default: ${var.env}
+        - name: sleep_seconds
+          default: "10"
       run_as:
         service_principal_name: b7cf2661-4e6b-4dbb-a8f8-a5429a9a8d15
