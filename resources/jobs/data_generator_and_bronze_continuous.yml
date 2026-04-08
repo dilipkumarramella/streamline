@@ -1,0 +1,51 @@
+resources:
+  jobs:
+    data_generator_and_bronze_continuous:
+      name: data_generator_and_bronze_continuous
+      email_notifications:
+        on_failure:
+          - dilip.dot.dot@gmail.com
+      tasks:
+        - task_key: consume_from_kafka_and_write_to_bronze
+          notebook_task:
+            notebook_path: ../notebooks/ingestion/bronze_delta.py
+            source: WORKSPACE
+            base_parameters:
+              bundle_root: ${workspace.file_path}
+          job_cluster_key: Job_cluster
+        - task_key: generate_data_and_produce_to_kafka
+          notebook_task:
+            notebook_path: ../notebooks/ingestion/data_generator.py
+            source: WORKSPACE
+            base_parameters:
+              bundle_root: ${workspace.file_path}
+          libraries:
+            - pypi:
+                package: faker==40.12.0
+            - pypi:
+                package: kafka-python-ng==2.2.3
+          job_cluster_key: Job_cluster
+      job_clusters:
+        - job_cluster_key: Job_cluster
+          new_cluster:
+            cluster_name: ""
+            spark_version: 17.3.x-scala2.13
+            azure_attributes:
+              first_on_demand: 1
+              spot_bid_max_price: -1
+            node_type_id: Standard_D4ds_v5
+            spark_env_vars:
+              PYSPARK_PYTHON: /databricks/python3/bin/python3
+            data_security_mode: DATA_SECURITY_MODE_DEDICATED
+            runtime_engine: STANDARD
+            kind: CLASSIC_PREVIEW
+            is_single_node: true
+      queue:
+        enabled: true
+      parameters:
+        - name: env
+          default: ${var.env}
+        - name: sleep_seconds
+          default: "10"
+      run_as:
+        service_principal_name: b7cf2661-4e6b-4dbb-a8f8-a5429a9a8d15
