@@ -43,14 +43,14 @@ def reprocess_dlq(topic: str):
     """
 
     schema_map = {
-        "orders":      order_schema,
-        "payments":    payment_schema,
+        "orders": order_schema,
+        "payments": payment_schema,
         "clickstream": clickstream_schema
     }
 
     table_map = {
-        "orders":      config["bronze_orders"],
-        "payments":    config["bronze_payments"],
+        "orders": config["bronze_orders"],
+        "payments": config["bronze_payments"],
         "clickstream": config["bronze_clickstream"]
     }
 

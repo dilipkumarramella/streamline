@@ -3,7 +3,7 @@
 # IMPORTS
 # ─────────────────────────────────
 import sys
- 
+
 bundle_root = dbutils.widgets.get("bundle_root")
 sys.path.append(bundle_root)
  
@@ -361,7 +361,8 @@ def write_to_gold(gold_df, row_count):
             location=get_table_location(
                 config["gold_path"],
                 config["gold_orders_daily"]
-                )
+                ),
+            partition_cols=["summary_date"]
         )
  
     else:
@@ -402,7 +403,7 @@ def optimize_gold_table(row_count):
         optimize_table(
             spark=spark,
             table_name=config["gold_orders_daily"],
-            zorder_cols=["summary_date", "category"]
+            zorder_cols=["category"]
         )
         print(f"Optimize complete on {config['gold_orders_daily']}")
     except Exception as e:

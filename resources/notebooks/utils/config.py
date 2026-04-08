@@ -57,13 +57,13 @@ def get_config(env: str) -> dict:
         
         "prod": {
             # Storage Account
-            "storage_account": "streamlineprodadls",
+            "storage_account": "streamlineprdstorage",
             
             # ADLS Paths
-            "bronze_path": "abfss://bronze@streamlineprodadls.dfs.core.windows.net/",
-            "silver_path": "abfss://silver@streamlineprodadls.dfs.core.windows.net/",
-            "gold_path": "abfss://gold@streamlineprodadls.dfs.core.windows.net/",
-            "checkpoint_path": "abfss://checkpoints@streamlineprodadls.dfs.core.windows.net/",
+            "bronze_path": "abfss://streamline@streamlineprdstorage.dfs.core.windows.net/bronze/",
+            "silver_path": "abfss://streamline@streamlineprdstorage.dfs.core.windows.net/silver/",
+            "gold_path": "abfss://streamline@streamlineprdstorage.dfs.core.windows.net/gold/",
+            "checkpoint_path": "abfss://streamline@streamlineprdstorage.dfs.core.windows.net/checkpoints",
             
             # Unity Catalog
             "catalog": "streamline",

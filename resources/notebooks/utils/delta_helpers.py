@@ -129,7 +129,6 @@ def read_stream_data(
 # WRITE FUNCTIONS
 # -------------------------------------
 
-
 def write_data(
     spark,
     df,
@@ -137,7 +136,8 @@ def write_data(
     mode: str = "append",
     location: str = None,
     table_name: str = None,
-    options: dict = {}
+    options: dict = {},
+    partition_cols: list = None
 ) -> None:
     """
 Reusable function to write DataFrame.
@@ -161,6 +161,9 @@ Args:
                 Example: "streamline.bronze.orders"
     options: Extra spark write options
              Default: empty dict
+    partition_cols: Partition columns (optional)
+                    Default: None
+                    Example: ["date"]
 
 Returns:
     None
@@ -195,6 +198,9 @@ Example:
     writer = df.write.format(file_type)
     writer = writer.mode(mode)
     writer = writer.option("mergeSchema", "true")
+
+    if partition_cols:
+        writer = writer.partitionBy(*partition_cols)
 
     for key, value in options.items():
         writer = writer.option(key, value)

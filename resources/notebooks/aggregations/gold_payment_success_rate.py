@@ -3,7 +3,6 @@
 # IMPORTS
 # ─────────────────────────────────
 import sys
- 
 bundle_root = dbutils.widgets.get("bundle_root")
 sys.path.append(bundle_root)
  
@@ -38,11 +37,12 @@ env = dbutils.widgets.get("env")
 config = get_config(env=env)
  
 # Backfill / Reprocessing parameters
-dbutils.widgets.text("start_date", "")
-dbutils.widgets.text("end_date", "")
+dbutils.widgets.text("start_date", "2026-03-20")
+dbutils.widgets.text("end_date", "2026-04-06")
  
 start_date = dbutils.widgets.get("start_date")
 end_date   = dbutils.widgets.get("end_date")
+
  
 # Validate both provided or both empty
 if bool(start_date) != bool(end_date):
@@ -274,7 +274,8 @@ def write_to_gold(gold_df, row_count):
             location=get_table_location(
                 config["gold_path"],
                 config["gold_payment_success"]
-                )
+                ),
+            partition_cols=["payment_date"]
         )
     else:
         write_data(
@@ -313,7 +314,7 @@ def optimize_gold_table(row_count):
         optimize_table(
             spark=spark,
             table_name=config["gold_payment_success"],
-            zorder_cols=["payment_date", "payment_method"]
+            zorder_cols=["payment_method"]
         )
         print(f"Optimize complete on {config['gold_payment_success']}")
     except Exception as e:

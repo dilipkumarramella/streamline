@@ -5,9 +5,6 @@ resources:
       email_notifications:
         on_failure:
           - dilip.dot.dot@gmail.com
-      continuous:
-        pause_status: PAUSED
-        task_retry_mode: ON_FAILURE
       tasks:
         - task_key: consume_from_kafka_and_write_to_bronze
           notebook_task:
