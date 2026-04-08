@@ -2,7 +2,7 @@ variables:
   dev_workspace:
     default: "https://adb-7405604613583163.3.azuredatabricks.net/"
   prod_workspace:
-    default: ""
+    default: "https://adb-7405608639451927.7.azuredatabricks.net/"
   env:
     description: "Deployment environment"
     default: dev

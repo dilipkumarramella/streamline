@@ -3,7 +3,6 @@
 # IMPORTS
 # ─────────────────────────────────
 import sys
- 
 bundle_root = dbutils.widgets.get("bundle_root")
 sys.path.append(bundle_root)
  
@@ -38,9 +37,9 @@ env = dbutils.widgets.get("env")
 config = get_config(env=env)
  
 # Backfill / Reprocessing parameters
-dbutils.widgets.text("start_date", "")
-dbutils.widgets.text("end_date", "")
- 
+dbutils.widgets.text("start_datetime", "")
+dbutils.widgets.text("end_datetime", "")
+
 start_date = dbutils.widgets.get("start_date")
 end_date   = dbutils.widgets.get("end_date")
  
@@ -292,7 +291,8 @@ def write_to_gold(gold_df, row_count):
             file_type="delta",
             mode="overwrite",
             table_name=config["gold_funnel_metrics"],
-            location=gold_location
+            location=gold_location,
+            partition_cols=["event_date"]
         )
     else:
         write_data(
@@ -330,8 +330,7 @@ def optimize_gold_table(row_count):
     try:
         optimize_table(
             spark=spark,
-            table_name=config["gold_funnel_metrics"],
-            zorder_cols=["event_date"]
+            table_name=config["gold_funnel_metrics"]
         )
         print(f"Optimize complete on {config['gold_funnel_metrics']}")
     except Exception as e:

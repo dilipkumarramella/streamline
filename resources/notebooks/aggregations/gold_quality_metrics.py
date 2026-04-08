@@ -3,7 +3,7 @@
 # IMPORTS
 # ─────────────────────────────────
 import sys
- 
+
 bundle_root = dbutils.widgets.get("bundle_root")
 sys.path.append(bundle_root)
  
@@ -38,10 +38,6 @@ env = dbutils.widgets.get("env")
 config = get_config(env=env)
  
 PIPELINE_NAME = "silver_to_gold_data_quality"
- 
-# Backfill / Reprocessing parameters
-dbutils.widgets.text("start_date", "")
-dbutils.widgets.text("end_date", "")
  
 start_date = dbutils.widgets.get("start_date")
 end_date   = dbutils.widgets.get("end_date")
@@ -322,7 +318,8 @@ def write_to_gold(gold_df, row_count):
             file_type="delta",
             mode="overwrite",
             table_name=config["gold_data_quality"],
-            location=gold_location
+            location=gold_location,
+            partition_cols=["pipeline_date"]
         )
     else:
         write_data(
@@ -361,7 +358,7 @@ def optimize_gold_table(row_count):
         optimize_table(
             spark=spark,
             table_name=config["gold_data_quality"],
-            zorder_cols=["pipeline_date", "pipeline_name"]
+            zorder_cols=["pipeline_name"]
         )
         print(f"Optimize complete on {config['gold_data_quality']}")
     except Exception as e:

@@ -6,8 +6,7 @@ import sys
 import os
 
 bundle_root = os.environ.get("BUNDLE_ROOT")
-if bundle_root:
-    sys.path.append(bundle_root)
+sys.path.append(bundle_root)
 
 from resources.notebooks.utils.config import get_config
 from resources.notebooks.utils.delta_helpers import (
@@ -28,9 +27,11 @@ from pyspark.sql.functions import (
     col,
     trim,
     lower,
-    expr
+    expr,
+    row_number
 )
 from delta.tables import DeltaTable
+from pyspark.sql.window import Window
 
 # COMMAND ----------
 
@@ -295,6 +296,28 @@ def run_quality_checks(df):
 
 # COMMAND ----------
 
+def deduplicate_latest(df):
+    """
+    Keep latest record per business key
+    using timestamp column
+    """
+
+    if source == "orders":
+        window = Window.partitionBy("order_id", "product_id") \
+                       .orderBy(col("order_timestamp").desc())
+
+    elif source == "payments":
+        window = Window.partitionBy("payment_id") \
+                       .orderBy(col("payment_timestamp").desc())
+
+    df = df.withColumn("rn", row_number().over(window)) \
+           .filter(col("rn") == 1) \
+           .drop("rn")
+
+    return df
+
+# COMMAND ----------
+
 # ─────────────────────────────────
 # WRITE RESULTS (UPDATED)
 # ─────────────────────────────────
@@ -340,7 +363,7 @@ def write_results(df, good_count, bad_count):
 # OPTIMIZE
 # ─────────────────────────────────
 def optimize_tables():
-    ""
+    """
     Optimize quarantine tables
     after reprocessing.
     Non critical - warns if fails!
@@ -384,6 +407,8 @@ def run_pipeline():
         df = run_quality_checks(df)
         print("Quality checks complete")
 
+        df = deduplicate_latest(df)
+        
         df.cache()
 
         good_df, bad_df = quarantine_records(df)
